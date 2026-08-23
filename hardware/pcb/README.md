@@ -4,8 +4,8 @@ Three boards, currently being designed in EasyEDA.
 
 | Board | Function | State |
 |---|---|---|
-| `motor_interface/` | Level shifting and signal conditioning between the motion controller and the four BLDC drivers, Hall signal buffering to the pulse counters | in design |
-| `safety_power/` | Safety state machine interface, current sensing, precharge sequencing, contactor drive, the hardware SAFE line | in design |
+| [`motor_interface/`](motor_interface/) | Hall passthrough with wire colour remapping, level shifting and signal conditioning to the pulse counters, CAN breakout | routed, pre production review |
+| [`safety_power/`](safety_power/) | Power distribution, 37 V / 12 V / 5 V buses, fusing, overvoltage and regeneration protection, precharge, current sensing | specified |
 | `can_distribution/` | CAN bus distribution with termination, node breakout and supply fan out | in design |
 
 Each board folder should end up containing:

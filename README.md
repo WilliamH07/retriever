@@ -9,9 +9,7 @@
 [![ROS 2](https://img.shields.io/badge/ROS%202-Jazzy-brightgreen.svg)](https://docs.ros.org/en/jazzy/)
 [![Status](https://img.shields.io/badge/status-in%20construction-yellow.svg)](#status)
 
-<!-- Drop a photo at docs/images/hero.jpg, then uncomment the line below.
-<img src="docs/images/hero.jpg" width="720" alt="Retriever chassis">
--->
+<img src="docs/images/01-hero-front-right.png" width="820" alt="Retriever, four wheel drive outdoor mobile robot">
 
 </div>
 
@@ -92,12 +90,29 @@ N6  Manual battery isolator and main fuse
 | Target speed | 1.5 m/s |
 | Drivetrain | 4 x 6.5 inch hub motors, 250 W each |
 | Motor drivers | 4 x BLDC controllers, 36 to 48 V |
-| Battery | 36 V, 280 Wh lithium ion, 10S3P |
-| Endurance | 70 min at 200 W average |
+| Battery | 37 V, 474 Wh lithium ion, 10S4P (`10INR19/66-4`), 30 to 42 V |
+| Endurance | ~115 min at 200 W average, 80 % of the pack usable |
 | Compute | x86 SBC, Ubuntu 24.04, ROS 2 Jazzy |
 | Real time | 3 x ESP32 on CAN 2.0A, 500 kbit/s |
 | Localisation | GNSS, IMU and wheel odometry, dual EKF |
 | Navigation | Nav2, collision monitor, twist mux |
+
+## Design
+
+Every image below is a render of the current CAD assembly, not a mock-up. The
+chassis is modelled in full before anything is cut.
+
+| | |
+|:--:|:--:|
+| <img src="docs/images/09-no-top-plate.png" width="420"> | <img src="docs/images/11-bare-frame.png" width="420"> |
+| Top plate removed, both decks visible | The bare aluminium extrusion frame |
+| <img src="docs/images/12-wheel-mount.png" width="420"> | <img src="docs/images/16-lower-deck-37v.png" width="420"> |
+| Hub motor axle mount | Lower deck, the 37 V compartment |
+
+Orthographic views for dimensioning: [front](docs/images/05-front.png) ·
+[side](docs/images/06-side-right.png) · [top](docs/images/07-top.png) ·
+[rear](docs/images/08-rear.png). The full set is in
+[`docs/images`](docs/images/).
 
 ## Repository layout
 
