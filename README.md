@@ -186,5 +186,4 @@ Licence Version 2, Strongly Reciprocal](LICENSE-HARDWARE.txt).
 
 ## Contact
 
-William Hanczyk, Bordeaux, France
-[YOUR EMAIL]
+William Hanczyk, France
