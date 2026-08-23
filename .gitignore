@@ -1,0 +1,47 @@
+# ROS 2 / colcon
+build/
+install/
+log/
+.colcon*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# C / C++
+*.o
+*.a
+*.so
+*.elf
+*.bin.tmp
+
+# PlatformIO / ESP-IDF
+.pio/
+.pioenvs/
+.piolibdeps/
+sdkconfig.old
+
+# EasyEDA and PCB output
+*-backups/
+*.kicad_pcb-bak
+*.kicad_sch-bak
+fp-info-cache
+
+# CAD autosave
+*.FCStd1
+*.f3d.bak
+~$*
+
+# Bag files and logs, large and not source
+*.mcap
+*.db3
+bags/
+*.log
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
