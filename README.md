@@ -86,11 +86,12 @@ N6  Manual battery isolator and main fuse
 |---|---|
 | Configuration | 4WD skid steer, outdoor |
 | Structure | Aluminium extrusion frame, laser cut panels, 3D printed mounts |
+| Footprint | 812 x 583 x 335 mm, 412 mm wheelbase, 458 mm track, ~95 mm ground clearance |
 | Target mass | 35 kg in running order |
 | Target speed | 1.5 m/s |
-| Drivetrain | 4 x 6.5 inch hub motors, 250 W each |
+| Drivetrain | 4 x hoverboard hub motors, 250 W each, 4.10/3.50-5 tyres, 286 mm overall |
 | Motor drivers | 4 x BLDC controllers, 36 to 48 V |
-| Battery | 37 V, 474 Wh lithium ion, 10S4P (`10INR19/66-4`), 30 to 42 V |
+| Battery | Xiaomi M365 Pro pack, 10S4P, 12.8 Ah, 474 Wh, 30 to 42 V |
 | Endurance | ~115 min at 200 W average, 80 % of the pack usable |
 | Compute | x86 SBC, Ubuntu 24.04, ROS 2 Jazzy |
 | Real time | 3 x ESP32 on CAN 2.0A, 500 kbit/s |

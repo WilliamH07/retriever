@@ -2,6 +2,29 @@
 
 Aluminium extrusion frame, laser cut panels, 3D printed mounts.
 
+## Measured geometry
+
+Taken from the CAD assembly, not from a drawing. These are the numbers the URDF
+and the skid steer kinematics need.
+
+| | Value |
+|---|---|
+| Overall envelope | **812 x 583 x 335 mm** |
+| Wheelbase | **412 mm** |
+| Track, centre to centre | **458 mm** |
+| Wheel outside diameter | **285.9 mm** (`4.10/3.50-5` tyre) |
+| Wheel axis height | 46 mm above the reference plane |
+| Ground clearance | **~95 mm** |
+
+The wheel diameter matters more than it looks. It sets the odometry scale:
+three Hall lines decoded gives 90 states per revolution, so pi x 286 / 90 =
+**10.0 mm per state**. It also sets the tractive effort, which falls in
+proportion to the radius for a given motor current.
+
+Mass cannot be read from the model yet: materials are not assigned, so Fusion
+reports a default steel density for every body and the figure is meaningless.
+The 35 kg in the architecture dossier remains an assumption.
+
 ```
 source/     native CAD files
 step/       STEP exports, for anyone using a different tool

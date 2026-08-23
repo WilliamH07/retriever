@@ -107,7 +107,7 @@ C'est le second point inconfortable, et il est chiffré.
 
 | Grandeur | Valeur | Source |
 |---|---|---|
-| Pack M365 | 10S3P, 7,8 Ah, **280 Wh**, 36 V nom / 42 V max | ✅ manuel Xiaomi (280 Wh, 36 V, 42 V) + 🟡 10S3P/7,8 Ah (analyse matérielle publiée) |
+| Pack M365 **Pro** | 10S4P, 12,8 Ah, **474 Wh**, 37 V nom / **42 V** pleine charge / **30 V** coupure | ✅ **marquage relevé sur le pack : `10INR19/66-4`** — 10 en série, 4 en parallèle, cellules 18650 de 3200 mAh. 37 × 12,8 = 473,6 Wh, conforme à l'étiquette |
 | Courant continu max du BMS d'origine | 🔴 **INCONNU — non publié** | Seule valeur approchante : 33 A continu / 133 A détection court-circuit sur un **BMS de remplacement tiers**, pas le BMS Xiaomi |
 | 4 × ZS-X11H, nominal | 4 × 16 A = **64 A** | 🟡 fiches revendeurs concordantes |
 | 4 × ZS-X11H, pointe | 4 × 20 A = **80 A** | 🟡 idem |
@@ -116,6 +116,8 @@ C'est le second point inconfortable, et il est chiffré.
 Autrement dit : la demande crête de la motorisation dépasse d'un facteur 2 à 3 ce que le pack peut vraisemblablement fournir, et **on ne connaît même pas le seuil réel de coupure du BMS**. Une coupure BMS en pleine manœuvre = perte instantanée de toute la puissance et de tout le calculateur.
 
 **Décision d'architecture** : le système impose un **budget de courant global**, appliqué par l'ESP32-SAFETY à partir de la mesure ACS758, avec limitation par saturation des consignes avant d'atteindre le seuil BMS.
+
+> **Révision.** Le pack s'est révélé être un **Pro (474 Wh, 10S4P)** et non un Classic : l'hypothèse H4 est infirmée et la question Q3 est tranchée. L'autonomie passe de ≈ 70 à **≈ 115 min** à 200 W. Le plafond de courant monte aussi — quatre branches de cellules en parallèle au lieu de trois — mais il **reste inconnu tant que M1 n'est pas mesurée**, et la conclusion de cette section ne change pas : la demande crête de la motorisation dépasse ce que le pack peut fournir. Les cellules 3200 mAh d'un Pro sont des cellules d'énergie, pas de puissance : 2C à 3C en continu, soit **26 à 40 A** au niveau des cellules, et c'est presque toujours le BMS qui limite en premier.
 
 | Budget | Valeur 📐 | Justification |
 |---|---|---|
@@ -222,7 +224,21 @@ C'est infiniment mieux qu'une estimation par ACS758 : on obtient le SOC calculé
 **Le ZS-X11H ne fournit pas de retour de vitesse signé — il faut lire les capteurs Hall directement.**
 🟡 La sortie `SC` de la carte bascule à chaque transition d'un des trois capteurs Hall, soit **90 transitions par tour** sur un moteur 6,5" (15 paires de pôles × 6). Mais c'est un train d'impulsions **non signé** : impossible de distinguer une roue qui recule d'une roue qui avance.
 
-Pour une odométrie exploitable par Nav2, c'est disqualifiant. **Solution retenue** : dériver **deux des trois lignes Hall** de chaque moteur vers les compteurs matériels (PCNT) de l'ESP32, à travers un tampon 74LVC245. Les signaux Hall étant déphasés de 120°, un décodage de type quadrature donne le **sens** et **60 comptes par tour** — soit ≈ **8,6 mm de résolution linéaire** sur une roue de 165 mm. Détail en §H.4.
+Pour une odométrie exploitable par Nav2, c'est disqualifiant. **Solution retenue** : dériver les lignes Hall de chaque moteur vers l'ESP32 à travers un tampon, et décoder les signaux déphasés de 120° pour obtenir le **sens** en plus du comptage. Détail en §H.4.
+
+> **Révision — la carte réalisée diffère de ce qui était prévu ici, et la roue n'est pas celle qu'on croyait.**
+>
+> La carte [`hardware/pcb/motor_interface`](../../hardware/pcb/motor_interface/) dérive **les trois** lignes Hall et non deux, à travers un **SN74LVC14A** (trigger de Schmitt, entrées tolérantes 5,5 V) et non un 74LVC245, chaque voie précédée d'un filtre RC 1 kΩ / 10 nF coupant à ≈ 16 kHz. On obtient donc **90 états par tour**, pas 60.
+>
+> La roue n'est pas une 6,5" de 165 mm : mesure sur l'assemblage CAO, **285,9 mm** hors tout, pneu `4.10/3.50-5`. La résolution linéaire réelle est donc de **π × 286 / 90 ≈ 10,0 mm** et non 8,6 mm.
+>
+> | | Prévu au dossier | Réalisé et mesuré |
+> |---|---|---|
+> | Lignes dérivées | 2 sur 3 | **3 sur 3** |
+> | Tampon | 74LVC245 | **SN74LVC14A** + RC 1 kΩ / 10 nF |
+> | Résolution angulaire | 60 comptes/tour | **90 états/tour** |
+> | Diamètre de roue | 165 mm | **286 mm** |
+> | Résolution linéaire | 8,6 mm | **10,0 mm** |
 
 ---
 
@@ -233,9 +249,9 @@ Pour une odométrie exploitable par Nav2, c'est disqualifiant. **Solution retenu
 | # | Hypothèse 📐 | Impact si fausse |
 |---|---|---|
 | H1 | Châssis **skid-steer** (4 roues fixes, virage par différentiel de vitesse), pas de direction | Change le contrôleur ros2_control et le modèle Nav2 |
-| H2 | Masse totale en ordre de marche **≈ 35 kg** | Recalcul du couple nécessaire, du budget de courant et des rampes |
-| H3 | Vitesse max visée **1,5 m/s** | Cohérent avec 578 tr/min mesurés à vide sous 36 V sur roue 6,5" → ≈ 5 m/s à vide ; on est très en dessous, c'est confortable |
-| H4 | Le pack M365 est un **Classic (280 Wh)**, pas un Pro (474 Wh) | Le Pro double l'autonomie et probablement le courant admissible |
+| H2 | Masse totale en ordre de marche **≈ 35 kg** | 🟡 **Toujours non confirmée.** Le modèle CAO ne porte pas encore les matériaux : sa propriété de masse n'a aucune valeur. Recalcul du couple, du budget de courant et des rampes si elle est fausse |
+| H3 | Vitesse max visée **1,5 m/s** | ✅ Confortable, et davantage qu'estimé : 578 tr/min à vide sous 36 V sur la roue réelle de **286 mm** donnent ≈ **8,7 m/s** à vide, on vise 17 % du régime libre. ⚠️ Contrepartie de la grande roue : l'effort de traction au sol baisse dans le même rapport (1,73×). À surveiller en pente |
+| H4 | ~~Le pack M365 est un **Classic (280 Wh)**, pas un Pro (474 Wh)~~ | 🔴 **INFIRMÉE.** Marquage `10INR19/66-4` → 10S4P, 12,8 Ah : c'est un **Pro, 474 Wh**. Autonomie ≈ 115 min à 200 W au lieu de 70. Courant admissible plus élevé, mais toujours à mesurer — voir M1 |
 | H5 | Le GPS USB est un récepteur **NMEA générique** (u-blox ou équivalent), pas un RTK | Sans RTK, précision 2–5 m : suffisant pour du waypoint, pas pour du suivi de rang |
 | H6 | Longueur maximale des câbles de puissance **≤ 1,5 m** | Au-delà, revoir les sections (§D.6) |
 | H7 | Température ambiante interne du coffret de puissance **≤ 60 °C** | Déclassement des câbles recalculé |
@@ -269,8 +285,8 @@ Ce sont les points que la documentation ne peut pas me donner et qui changent de
 | # | Question | Pourquoi c'est bloquant |
 |---|---|---|
 | **Q1** | **Quelle est la masse cible du robot en ordre de marche, et la pente maximale qu'il doit franchir ?** | Le couple nécessaire, donc le courant, donc tout le dimensionnement de puissance et le budget d'autonomie. Une pente de 15 % à 35 kg change complètement les pointes de courant. |
-| **Q2** | **As-tu déjà un châssis, ou est-il à concevoir ?** Dimensions, empattement, voie, garde au sol. | L'empattement et la voie entrent directement dans la cinématique skid-steer, dans l'URDF et dans le calibrage `wheel_separation_multiplier`. |
-| **Q3** | **Le pack M365 est-il un Classic (280 Wh) ou un Pro (474 Wh) ? Est-il d'origine ou remplacé (BMS tiers) ?** | Le courant admissible, l'autonomie et le protocole BMS en dépendent. Un BMS tiers « Repair BMS gen4 » a des seuils documentés (33 A) ; le BMS Xiaomi non. |
+| **Q2** | ✅ **RÉPONDUE.** Châssis conçu et modélisé. Encombrement **812 × 583 × 335 mm**, empattement **412 mm**, voie **458 mm** centre à centre, garde au sol **≈ 95 mm**, roue **Ø 286 mm**, axe à 46 mm au-dessus du plan de référence. Relevé sur l'assemblage CAO | Ces cinq valeurs vont directement dans l'URDF et dans le calibrage `wheel_separation_multiplier`. Voir [`hardware/cad`](../../hardware/cad/) |
+| **Q3** | ✅ **RÉPONDUE pour le pack : c'est un Pro**, marquage `10INR19/66-4` = 10S4P, 12,8 Ah, 474 Wh. 🔴 **Reste ouvert** : BMS d'origine ou tiers ? | Le courant admissible et le protocole BMS en dépendent. Un BMS tiers « Repair BMS gen4 » a des seuils documentés (33 A) ; le BMS Xiaomi non. **M1 reste impérative.** |
 | **Q4** | **Quelle est la référence exacte du GPS USB ?** | Détermine le driver ROS 2 (`nmea_navsat_driver` vs `ublox`), la fréquence, et si un heading double-antenne est envisageable plus tard. |
 | **Q5** | **Combien d'ESP32 possèdes-tu exactement, et quels modèles ?** (ESP32 classique, S3, C3, WROOM/WROVER, carte de dev ?) | L'architecture en réclame **3**. Le modèle détermine : présence du contrôleur TWAI (CAN), nombre de DAC, nombre d'unités PCNT, RAM. L'ESP32-S3 **n'a pas de DAC** — cela change le circuit de commande des ZS-X11H. |
 | **Q6** | **Acceptes-tu de percer/tarauder du cuivre et de sertir avec une pince hydraulique** (achat ou emprunt ~60–120 €) ? | Sinon il faut partir sur des busbars préfabriqués du commerce (Victron Lynx, Blue Sea), plus chers mais sûrs. Le sertissage 25 mm² à la pince manuelle de GSB est un point chaud garanti : **1 mΩ = 10 W à 100 A**. |

@@ -293,7 +293,7 @@ Ce que Leroy Merlin Mérignac fournit très bien : coffrets IP65, presse-étoupe
 ║                                                                              ║
 ║  ┌────────────┐  ① coupe-  ② MRBF   ③ ACS758  ④ CONTACTEUR                  ║
 ║  │ PACK M365  │   batterie   80 A     100 A      DC 100 A                   ║
-║  │ 10S · 280Wh├──►  DC   ──► 58 V ──► bidir. ──►   NO    ──┬──► BUSBAR +     ║
+║  │10S4P·474Wh ├──►  DC   ──► 58 V ──► bidir. ──►   NO    ──┬──► BUSBAR +     ║
 ║  │ 30–42 V    │    48 V     AIC2kA              ▲         │   Cu 20×3 étamé ║
 ║  │ BMS ⚡UART │                                  │         │   10 postes     ║
 ║  └────────────┘                        ⑤ précharge         │   2 libres      ║
