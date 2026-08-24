@@ -1,0 +1,1067 @@
+# =============================================================================
+#  ICD — Interface Control Document — Robot Husky
+# =============================================================================
+#  Source unique de vérité pour la connectique matérielle des trois cartes.
+#  Ce fichier génère : la documentation, les étiquettes de sérigraphie,
+#  la liste de câbles du faisceau, et les fiches de recette.
+#
+#  RÈGLE : toute modification ici est un commit. Un diff entre deux révisions
+#  doit être lisible. Ne jamais modifier une sérigraphie sans passer par ici.
+#
+#  Version : 1.2 — 24 août 2026  (contacteur statique intégré — voir 12-contacteur-statique.md)
+#  Convention de statut :
+#    verified      : datasheet constructeur (voir 09-validation-composants.md)
+#    consensus     : sources indépendantes concordantes
+#    to_measure    : INTERDICTION DE ROUTER avant mesure
+#    assumption    : valeur posée faute de donnée
+# =============================================================================
+
+meta:
+  version: "1.2"
+  date: "2026-08-24"
+  bus_nominal_v: 37.0
+  bus_min_v: 30.0
+  bus_max_v: 42.0
+  can_bitrate: 500000
+  can_standard: "CAN 2.0A, 11 bits"
+
+# -----------------------------------------------------------------------------
+#  Codes couleur de fil — VALABLES POUR TOUT LE ROBOT, sans exception
+# -----------------------------------------------------------------------------
+wire_colours:
+  scope: >
+    RÈGLE STRICTE sur les faisceaux de PUISSANCE et de SÉCURITÉ.
+    Sur les faisceaux de signal internes (SPI, I2C, capteurs), les couleurs sont
+    indicatives : elles servent au repérage, pas à l'identification d'un rail.
+    v1.0 énonçait une règle absolue que le fichier violait lui-même une douzaine
+    de fois — c'est ce périmètre restreint qui est tenable.
+
+  # --- Rails d'alimentation : RÈGLE ABSOLUE, aucune exception ---
+  BUS_P:      {colour: rouge,        awg: "25 mm2", note: "42 V — JAMAIS une autre couleur, et le rouge ne désigne JAMAIS autre chose sur un faisceau de puissance"}
+  BUS_N:      {colour: noir,         awg: "25 mm2"}
+  V12:        {colour: jaune,        awg: "1.5 mm2"}
+  V5:         {colour: orange,       awg: "1.0 mm2"}
+  V5_BRAKE:   {colour: rose,         awg: "0.5 mm2", note: "5 V pris en AMONT du contacteur — distinct du V5 normal, volontairement"}
+  V3V3:       {colour: blanc,        awg: "0.5 mm2"}
+  GND_LOGIC:  {colour: noir_liseré,  awg: "0.5 mm2", note: "liseré blanc — distinct du BUS_N. À utiliser partout, y compris sur les connecteurs de périphériques"}
+
+  # --- Sécurité : RÈGLE ABSOLUE ---
+  SAFE_N:     {colour: violet,       awg: "0.5 mm2", note: "couleur réservée à la ligne /SAFE elle-même"}
+  ESTOP:      {colour: violet_liseré, awg: "0.5 mm2", note: "boucles de champignon et commande de frein — violet à liseré, distinct de /SAFE"}
+
+  # --- Bus CAN : RÈGLE ABSOLUE ---
+  CANH:       {colour: vert,         awg: "0.34 mm2", note: "paire torsadée blindée avec CANL"}
+  CANL:       {colour: brun,         awg: "0.34 mm2"}
+
+  # --- Signaux : indicatif ---
+  SIGNAL:     {colours: [bleu, gris, jaune_liseré], note: "repérage seulement, pas d'identification de rail"}
+
+# =============================================================================
+#  CARTE 1 — safety_power
+# =============================================================================
+boards:
+
+  safety_power:
+    rev: A
+    exemplaires_en_service: 1
+    lot: 5
+    layers: 4
+    copper: "2 oz externe"
+    mcu: "ESP32-DevKitC V4, 38 broches, sockets Mill-Max 310, entraxe 25.40 mm"
+    status: "bloquée par M1, M2, M10, M12 et identification du pack"
+
+    connectors:
+
+      J1:
+        name: BAT_IN
+        function: "Entrée batterie, aval du coupe-batterie et du MRBF"
+        type: "Phoenix PC 5/2-STF1-7,62"
+        rating: {current_a: 32, derated_a: 25.6, voltage_v: 1000, torque_nm: "0.5-0.8", status: verified}
+        derating_warning: >
+          32 A IEC, mais Phoenix applique un facteur documenté de 0,8 -> 25,6 A.
+          C'EST LA TOTALITÉ DU COURANT DU PACK QUI PASSE ICI.
+          Si M1 révèle un budget continu au-dessus de 25 A, ce connecteur est
+          insuffisant et il faut passer à un insert M4 + cosse à oeil, ou à un
+          Anderson SB50 (50 A wire-to-PCB, 600 V, hot-plug qualifié UL).
+        keying: "pas 7.62 mm — unique sur la carte"
+        upstream_protection:
+          fuse: "MRBF 58 V"
+          calibre: "🔴 À FIGER APRÈS M1 ET M2 — voir fuse_coordination"
+        pins:
+          1: {net: BUS_P, wire: rouge, awg: "25 mm2"}
+          2: {net: BUS_N, wire: noir,  awg: "25 mm2"}
+
+      J2:
+        name: BMS_UART
+        function: "Télémétrie BMS M365 — LECTURE SEULE, isolation galvanique obligatoire"
+        type: "JST PAP03-V 3 pos (côté pack, d'origine)"
+        status: to_measure
+        blocking_measurement: M3
+        note: >
+          Niveau logique 3,3 V PRÉSUMÉ, non documenté. Le connecteur n'a pas de
+          masse dédiée : le retour passe par le négatif de puissance.
+          ISOLATION GALVANIQUE NON NÉGOCIABLE (ADuM1201 ou opto rapide).
+          Jamais d'écriture vers le BMS.
+        pins:
+          1: {net: BMS_R, wire: blanc, note: "RX ESC <- TX BMS  — à confirmer M3"}
+          2: {net: BMS_T, wire: jaune, note: "TX ESC -> RX BMS  — à confirmer M3"}
+          3: {net: BMS_L, wire: vert,  note: "feu stop — NON UTILISÉ, ne pas câbler"}
+
+      J3_J6:
+        name: MOT_CTRL_1..4
+        function: "Sortie 42 V vers les 4 ZS-X11H, une branche fusée par variateur"
+        type: "Phoenix PC 5/2-STF1-7,62"
+        instances: [AV_G, AV_D, AR_G, AR_D]
+        interchangeable: true
+        note: "Les 4 connecteurs sont électriquement identiques — même type autorisé"
+        protection:
+          fuse_holder: "Littelfuse MIDI 498 Series, in-board M3"
+          fuse: "Littelfuse BF1 58V, 25 A"
+          rating: {voltage_v: 58, status: verified}
+          warning: "MIDI STANDARD = 32 V DC — INTERDIT sur ce bus"
+          current_sense: "shunt 2 mOhm + INA228 (85 V CM, adresse I2C dédiée)"
+        pins:
+          1: {net: BUS_P_FUSED, wire: rouge, awg: "6 mm2"}
+          2: {net: BUS_N,       wire: noir,  awg: "6 mm2"}
+
+      J7:
+        name: PWR_12V_COMPUTE
+        function: "Alimentation Youyeetoo X1 — rail isolé galvaniquement"
+        type: "JST XH 2 pos (imposé par le header XH2.54 du X1)"
+        rating: {current_a: 3, status: verified}
+        lock: "⚠️ FRICTION SEULEMENT — le XH n'a pas de verrouillage positif"
+        exception: >
+          EXCEPTION ASSUMÉE à la règle "connecteurs verrouillables".
+          Le connecteur est imposé par le X1, qui n'accepte qu'un XH2.54 ou un
+          jack coaxial — et le jack est pire en vibration.
+          COMPENSATION OBLIGATOIRE : collier de maintien à moins de 30 mm du
+          connecteur, des deux côtés, plus un point de colle silicone.
+          v1.0 présentait ce choix comme bon sans signaler qu'il violait la règle.
+        pins:
+          1: {net: V12_COMPUTE, wire: jaune}
+          2: {net: GND_COMPUTE, wire: noir, note: "masse ISOLÉE — ne pas relier à GND_LOGIC"}
+
+      J8:
+        name: PWR_12V_AUX
+        function: "Ventilateurs, bobine contacteur, relais précharge"
+        type: "Molex Micro-Fit 3.0, 4 pos"
+        rating: {current_per_circuit_a: 6.0, awg: 20, voltage_v: 600, status: interpolated}
+        rating_note: >
+          La table Molex donne 7,0 A à 2 circuits et 5,5 A à 6 circuits en 20 AWG.
+          À 4 circuits, la valeur interpolée est ~6,0 A. v1.0 annonçait 7,0 A avec
+          un statut "verified" — c'était le chiffre d'un connecteur 2 circuits.
+          Pour un chiffre contractuel, lire la ligne exacte de la spec Molex.
+        protection: "TPS259573 eFuse, OVLO 16 V (diviseur 124k/10k)"
+        pins:
+          1: {net: V12_AUX, wire: jaune}
+          2: {net: V12_AUX, wire: jaune}
+          3: {net: GND_LOGIC, wire: noir_liseré}
+          4: {net: GND_LOGIC, wire: noir_liseré}
+
+      J9:
+        name: PWR_5V_LOGIC
+        function: "Rail logique — ESP32 MOTION, capteurs, YDLIDAR"
+        type: "Molex Micro-Fit 3.0, 4 pos"
+        note: "YDLIDAR : pointe 1 A au démarrage moteur — dimensionner l'eFuse en conséquence"
+        pins:
+          1: {net: V5_LOGIC, wire: orange}
+          2: {net: V5_LOGIC, wire: orange}
+          3: {net: GND_LOGIC, wire: noir_liseré}
+          4: {net: GND_LOGIC, wire: noir_liseré}
+
+      J10:
+        name: SUPPRIME
+        status: removed
+        was: "Bobine du contacteur DC principal (composant externe acheté)"
+        replaced_by: "solid_state_contactor — bloc ON-BOARD, voir ci-dessous"
+        decision: >
+          Décision du 24 août 2026 : le contacteur est CONÇU SUR LA CARTE,
+          pas acheté. Le connecteur de bobine disparaît, ainsi que le contacteur
+          externe (80-200 EUR), le relais de précharge et la consommation
+          permanente de bobine (2-8 W).
+          Étude complète : 12-contacteur-statique.md
+
+      J11:
+        name: ESTOP_LOOP
+        function: "Boucle champignon — contact NF, double canal"
+        type: "Molex Micro-Fit 3.0, 4 pos"
+        note: >
+          NF OBLIGATOIRE : un contact NO ne détecte pas la rupture de fil.
+          Double contact recommandé : divergence entre les deux canaux
+          détectable en continu, pas seulement au boot (§M.2 panne 32).
+        wiring: >
+          ⚠️ LE CONTACT NF EST EN SÉRIE AVEC L'UNIQUE PULL-UP DE /SAFE,
+          il ne tire pas la ligne à la masse. Champignon relâché = contact fermé
+          = pull-up connecté = /SAFE haut = permissif. Enfoncé ou fil coupé =
+          pull-up déconnecté = les pull-downs ramènent la ligne à la masse.
+        pins:
+          1: {net: ESTOP_CH1_A, wire: violet_liseré}
+          2: {net: ESTOP_CH1_B, wire: violet_liseré}
+          3: {net: ESTOP_CH2_A, wire: violet_liseré}
+          4: {net: ESTOP_CH2_B, wire: violet_liseré}
+
+      J12:
+        name: BRAKE_CHOPPER
+        function: "Résistance de freinage régénératif — HORS CARTE"
+        type: "Phoenix PC 5/2-STF1-7,62"
+        note: >
+          Résistance TT WH100-22RJI, 22 Ohm 100 W, impédance thermique 1 degC/W.
+          MONTAGE SUR CHÂSSIS OU DISSIPATEUR, JAMAIS SUR LE PCB.
+          Commande : comparateur à hystérésis ANALOGIQUE, ON 42.5 V / OFF 41.8 V,
+          alimenté par le bus lui-même, EN AVAL DU CONTACTEUR.
+          Aucune dépendance à un microcontrôleur ni à un rail logique.
+        pins:
+          1: {net: CHOP_P, wire: rouge, awg: "2.5 mm2"}
+          2: {net: CHOP_N, wire: noir,  awg: "2.5 mm2"}
+
+      J13:
+        name: PRECHARGE_R
+        function: "Résistance de précharge — HORS CARTE. CONSERVÉE."
+        type: "Phoenix PC 5/2-STF1-7,62"
+        why_kept: >
+          ⚠️ J'avais annoncé que le contacteur statique supprimait la précharge,
+          par rampe de grille du MOSFET principal. C'EST FAUX et le calcul est
+          sans appel : un MOSFET trench moderne a une SOA de 0,5 A à 54 V / 10 ms
+          (chiffre publié par Infineon), là où la précharge en demande 4,2 A à 42 V.
+          Facteur 16 à 40 selon la durée. Et mettre des transistors en parallèle
+          n'aide pas : en mode linéaire le die le plus chaud attire plus de courant.
+          La résistance de précharge reste, et c'est aussi la topologie de
+          référence de TI pour les disjoncteurs de BMS (SLUAAS8 : Q3 + R en
+          parallèle du chemin principal).
+        note: >
+          Vishay RH02510R00FE02, 10 Ohm 25 W. Tenue en surcharge courte
+          5x pendant 5 s = ~625 J, contre 8.8 J d'énergie de précharge (10 mF, 42 V).
+          Marge x70. Valeur à recaler après M10.
+        pins:
+          1: {net: PRE_P, wire: rouge}
+          2: {net: PRE_N, wire: noir}
+
+      solid_state_contactor:
+        name: "Contacteur statique — BLOC ON-BOARD, pas un connecteur"
+        function: "Coupure commandée du bus 42 V. Remplace le contacteur DC externe."
+        reference: "12-contacteur-statique.md pour l'étude complète"
+
+        controller:
+          part: "TPS4810-Q1, VSSOP DGX 19 broches"
+          why: >
+            SEUL composant au-dessus de 40 V à offrir DEUX SORTIES DE GRILLE
+            INDÉPENDANTES (G1PU/G1PD, G2) et DEUX ENTRÉES (INP1, INP2).
+            C'est ce qui rend possible le diagnostic de transistor collé, qui
+            exige d'ouvrir l'un pour tester l'autre.
+            ⚠️ LTC7000, LTC4368, LM5069, TPS2492, LTC4260, LTC4364, TPS4811-Q1 :
+            TOUS n'ont qu'UNE seule sortie de grille -> diagnostic IMPOSSIBLE.
+            ⚠️ TPS1210-Q1 écarté : 45 V abs max contre un bus à 42 V.
+            ⚠️ Aucun eFuse à FET intégré n'existe au-dessus de 6 A en 40-80 V.
+          specs:
+            vs_range: "3,5 - 95 V op. (🔴 sources TI contradictoires 80/95/100 V — sans effet à 42 V)"
+            reverse_polarity: "-65 V"
+            gate_current: "1,62 A source / 2 A sink"
+            charge_pump: "11 V intégrée, ~345 uA"
+            iq: "35 uA actif, 1 uA veille"
+            scp_threshold: "R_ISCP = (I_SC x R_SNS - 19 mV) / 2 uA"
+            scp_response: "~4,3 us"
+            fault: "FLT drain ouvert. 32 retry auto, ou latch par 100 kOhm sur TMR"
+            self_test: >
+              ⭐ Broche SCP_TEST : simule un défaut en interne et vérifie que la
+              grille ET FLT retombent. Teste l'ORGANE DE PROTECTION lui-même —
+              exactement ce que le §K réclame et qu'on ne peut normalement pas faire.
+          availability: "⚠️ AEC-Q100 uniquement, aucune version industrielle"
+
+        power_fets:
+          part: "2 x IPB017N10N5, D2PAK-7, 100 V, 1,7 mOhm max @ VGS=10V, RthJC 0,4 K/W"
+          topology: "TÊTE-BÊCHE SOURCE COMMUNE"
+          why_back_to_back: >
+            Un MOSFET côté haut seul (drain batterie, source charge) laisse sa
+            DIODE DE CORPS conduire de la charge vers la batterie. Ouvrir un
+            transistor unique arrêterait la décharge mais LAISSERAIT PASSER LE
+            COURANT DE RÉGÉNÉRATION. Sur un robot à freinage régénératif c'est
+            disqualifiant.
+            ⚠️ Corollaire : puisque l'interrupteur bloque la régénération,
+            LE HACHEUR DE FREINAGE DEVIENT INDISPENSABLE — l'énergie n'a plus
+            aucune autre issue. Voir C-S2.
+          not_linearfet: >
+            La précharge n'étant plus faite en linéaire, le transistor principal
+            n'a PAS besoin d'être un LinearFET. Un trench standard, moins cher et
+            à RDS(on) plus bas, convient.
+          thermal:
+            budget: "20 A continu / 30 A pendant <= 2 s (budget ESP32-SAFETY, §A.1-5)"
+            correction: >
+              ⚠️ Les 83 A du §C.3 sont le chiffre de COORDINATION DES FUSIBLES ET
+              DES CÂBLES, pas ce que traverse l'interrupteur. Celui-ci est en aval
+              du fusible et ne voit que le courant réel, borné par le budget.
+            dissipation: "20 A -> 2,1 W total (2 en série) ; 30 A -> 4,7 W"
+            rthja_datasheet: >
+              62 K/W en 'minimal footprint' ; 40 K/W avec 6 cm2 de cuivre 70 um,
+              CARTE VERTICALE EN AIR LIBRE — conditions qui ne sont pas celles
+              d'un coffret de robot.
+            requirement: >
+              10 à 12 cm2 de plan de drain PAR TRANSISTOR, sur les deux faces,
+              cousues d'une matrice de vias thermiques -> RthJA ~25 K/W
+              -> Tj ~101 degC à 60 degC ambiant, 24 K de marge.
+            to_verify: "🔴 Zth(j-a) à 2 s et coefficient RDS(on) vs Tj : courbes seulement"
+
+        turn_off:
+          problem: >
+            Couper 25 A dans 1,5 uH de faisceau en 100 ns donne L.di/dt = 375 V,
+            sur un transistor qui tient 100 V. Il faut RALENTIR VOLONTAIREMENT.
+          gate_resistor:
+            value: "100 à 220 Ohm"
+            effect: "21 A/us -> VDS crête 73 V ; 9,6 A/us -> 56 V"
+            to_verify: "🔴 le Qgd réel décide — courbe seulement, à valider à l'oscilloscope"
+            tradeoff: >
+              ⚠️ Ce Rg ralentit AUSSI la coupure sur défaut : +3 us environ sur les
+              4,3 us du TPS4810. Le TVS est la vraie protection, pas le Rg.
+          tvs:
+            part: "SMCJ48A, DRAIN-À-DRAIN en travers de l'interrupteur complet"
+            margin: "VRWM 48 V > 42 V bus (pas de conduction en service) ; VC 77,4 V < 100 V VDS -> 22 V de marge"
+            energy: "~1 mJ à absorber contre 1500 W crête — sans objet"
+          freewheel:
+            part: "Schottky 100 V, du noeud de charge vers GND, cathode au noeud"
+            why: >
+              Le faisceau côté charge force le noeud de sortie SOUS LA MASSE à la
+              coupure. TI le documente : 'the device can see transient negative
+              voltages during regular operation due to output cable harness
+              inductance kickbacks when the switches are turned OFF'.
+
+        precharge_fet:
+          part: "P-canal 100 V, ~100 mOhm"
+          driven_by: "ESP32-SAFETY directement, PAS par le TPS4810"
+          why: >
+            ⚠️ CONFLIT D'AFFECTATION. Dans la topologie TI, INP2/G2 pilote le FET
+            de précharge et INP1 pilote Q1+Q2 ensemble. Dans la topologie de
+            DIAGNOSTIC, INP1 et INP2 pilotent Q1 et Q2 séparément.
+            UN SEUL TPS4810-Q1 NE PEUT PAS FAIRE LES DEUX.
+            Résolution : INP1/INP2 dédiés au diagnostic (fonction de sécurité),
+            FET de précharge piloté par un GPIO. Coût : un GPIO, que la carte a.
+          topology: "P-canal, source au BUS+, grille tirée 10 V plus bas par un petit N-FET et une zener"
+          dissipation: "saturé, pas en linéaire -> 4,2 A x 100 mOhm = 1,8 W pendant 0,5 s, sans objet"
+
+        stuck_fet_diagnostic:
+          node: "DIAG"
+          warning: >
+            ⚠️ DIAG N'EST PAS UNE BROCHE DU CIRCUIT INTÉGRÉ. C'est un noeud de
+            tension de la carte, entre les deux transistors tête-bêche, à ramener
+            sur un diviseur et une entrée de l'ADS1115. Le nom vient de la note TI.
+          pull_down: "100 kOhm vers GND sur le noeud DIAG — INDISPENSABLE pour garantir un état bas défini quand tout est ouvert"
+          ti_table_stuck_off:
+            - {inp1: H, inp2: L, diag: bas, conclusion: "Q1 collé OUVERT"}
+            - {inp1: L, inp2: H, diag: bas, conclusion: "Q2 collé OUVERT"}
+          gap: >
+            🔴 La table TI ne couvre QUE le collé OUVERT. Le cas qui nous intéresse
+            est le collé FERMÉ (MOSFET claqué en court-circuit). Le principe dual
+            est évident — commander INP1 = INP2 = L et vérifier que DIAG s'effondre —
+            MAIS TI NE LE TABULE PAS. À dériver et valider sur maquette.
+          precondition: >
+            ⚠️ Le test n'est exécutable qu'une fois les 10 mF déchargés. La décharge
+            active du §D.8 devient donc une CONDITION DU DIAGNOSTIC, plus seulement
+            une commodité de maintenance.
+
+        residual_risk:
+          statement: >
+            ⚠️ Un MOSFET stressé claque EN COURT-CIRCUIT ; un contacteur mécanique
+            qui a fermé sur charge SE SOUDE. AUCUN DES DEUX NE DÉFAILLE EN SÉCURITÉ.
+            Un sectionneur statique seul ne fournit pas de coupure garantie sur
+            défaut silicium.
+          mitigation: >
+            L'organe de dernier recours existe déjà dans l'architecture : le
+            COUPE-BATTERIE MANUEL et le FUSIBLE MRBF, niveau N6 du §A.1.
+            Le contacteur statique remplace le niveau N5 COMMANDÉ, pas le
+            sectionnement manuel. C'est la condition qui rend le choix acceptable,
+            et elle doit rester écrite noir sur blanc.
+          source_honesty: >
+            🔴 La pratique EV de conserver un organe électromécanique en série est
+            une pratique de secteur ; je n'ai trouvé aucune note d'application
+            constructeur l'énonçant explicitement.
+
+      J14:
+        name: ACS758
+        function: "Interface capteur de courant externe existant"
+        type: "Molex Micro-Fit 3.0, 3 pos"
+        note: >
+          ACS758LCB-100B, NRND depuis mars 2025. Conservé pour la détection de
+          défaut, PAS pour le SOC (dérive d'offset +/-1 A, §A.5).
+          Redondance de plausibilité avec l'INA228 du bus principal : deux
+          principes de mesure indépendants sur la même grandeur détectent
+          une sortie figée (§C.1).
+        two_paths:
+          rapide:
+            what: "COMPARATEUR ANALOGIQUE directement sur la sortie du capteur"
+            component: "TLV3201 ou LM393, seuil réglé sur 35 A, sortie -> /SAFE"
+            latency: "quelques us"
+            why: >
+              CORRECTION v1.0 : le fichier revendiquait une "détection rapide 4 us"
+              en lisant le capteur par l'ADS1115. C'EST IMPOSSIBLE : l'ADS1115
+              plafonne à 860 ech/s, soit 1,16 ms par conversion — 290 fois plus lent.
+              Les 4 us du capteur ne servent à rien derrière un convertisseur lent.
+              Seul un comparateur analogique tient cette promesse.
+          lent:
+            what: "valeur mesurée pour la télémétrie et le budget de courant"
+            component: "ADS1115, canal 0"
+            filter: "RC 1k + 10nF SUR CETTE BRANCHE UNIQUEMENT"
+            note: >
+              La datasheet impose R_LOAD >= 4,7k et C_LOAD <= 10nF vue du capteur.
+              Le 1k série est admissible parce que l'impédance d'entrée de l'ADS1115
+              est très supérieure — mais le filtre ne doit PAS être placé en amont
+              du comparateur rapide, sinon il en détruit la latence.
+        pins:
+          1: {net: V5_LOGIC, wire: orange}
+          2: {net: ACS_OUT,  wire: bleu}
+          3: {net: GND_LOGIC, wire: noir_liseré}
+
+      fuse_coordination:
+        name: "Coordination des protections — À FIGER APRÈS M1 ET M2"
+        status: to_measure
+        problem: >
+          4 branches x 25 A = 100 A de fusibles aval, sur un pack dont le courant
+          admissible au niveau cellule est de 26 à 40 A (10S4P, C1).
+          UN FUSIBLE DE BRANCHE DE 25 A NE FONDRA JAMAIS SUR UNE SURCHARGE :
+          le BMS coupera d'abord. Le fusible ne sert que sur un COURT-CIRCUIT FRANC,
+          où le courant de défaut est limité par la résistance interne du pack
+          (400 à 1400 A selon M2) et où il fond en quelques ms.
+        consequence: >
+          C'est acceptable — c'est même le rôle correct d'un fusible — mais il faut
+          l'écrire. La protection contre un excès de courant RAISONNABLE MAIS TROP
+          LONG est faite par le budget logiciel de l'ESP32-SAFETY (§M), jamais par
+          le fusible.
+        to_decide_after_M1_M2:
+          - "Calibre du MRBF de tête : dimensionné sur l'ampacité du 25 mm2 (92 A après déclassement) et sur la somme des pointes légitimes (4 x 20 + 3 = 83 A). Piste : 60 A si M1 donne un seuil BMS bas, sinon 80 A."
+          - "Sélectivité : rapport >= 2:1 entre le fusible de tête et un fusible de branche. Avec des branches à 25 A, le minimum est 50 A."
+          - "Pouvoir de coupure : si M2 révèle un I_cc > 1500 A, passer du MRBF (2000 A @ 58 V) au Class T (20 000 A @ 125 V)."
+          - "Calibre des branches : 25 A est au-dessus des 20 A de pointe du ZS-X11H et sous l'ampacité du 6 mm2 (28 A). Ne pas descendre sous 20 A sous peine de fusion sur franchissement d'obstacle."
+
+      J15:
+        name: CAN_SAFE_A
+        function: "Bus CAN + /SAFE + alim — voir safety_bus_distribution"
+        type: "Molex Micro-Fit 3.0, 6 pos"
+        pinout_ref: "CAN_SAFE_6P"
+
+      J16:
+        name: CAN_SAFE_B
+        function: "Second connecteur en parallèle — passage du bus sans stub"
+        type: "Molex Micro-Fit 3.0, 6 pos"
+        pinout_ref: "CAN_SAFE_6P"
+
+      J17:
+        name: IMU_BNO085
+        function: "IMU déportée sur mât — SPI"
+        type: "JST GH 8 pos"
+        rating: {current_a: 1.0, voltage_v: 50, lock: positif, status: verified}
+        note: >
+          MONTAGE OBLIGATOIRE : mât non ferreux, >= 25 cm au-dessus des busbars
+          et >= 30 cm des moteurs (§N.3 — le magnétomètre est le maillon faible).
+          Câble <= 15 cm blindé.
+          PS1 et PS0 DOIVENT ÊTRE HAUTS AVANT LE RESET pour sélectionner le SPI.
+          PS0/WAKE doit aller à un GPIO, pas être câblé en dur.
+          BOOTN tiré haut par 10 k.
+          VDD doit monter AVANT ou AVEC VDDIO.
+          Attendre l'assertion de H_INTN, pas un délai fixe.
+        pins:
+          1: {net: V3V3,     wire: blanc}
+          2: {net: GND_LOGIC, wire: noir_liseré}
+          3: {net: SPI_SCK,  wire: jaune}
+          4: {net: SPI_MISO, wire: vert}
+          5: {net: SPI_MOSI, wire: bleu}
+          6: {net: SPI_CS,   wire: gris}
+          7: {net: IMU_INT,  wire: jaune_liseré,   note: "H_INTN, actif bas, GPIO à capacité de réveil"}
+          8: {net: IMU_WAKE, wire: bleu, note: "PS0/WAKE — GPIO obligatoire"}
+
+      J18:
+        name: FANS
+        function: "2 ventilateurs PWM 12 V, 4 fils"
+        type: "2 x header ventilateur 4 pos standard"
+        note: >
+          PWM 25 kHz, commande DRAIN OUVERT (l'entrée du ventilateur a son
+          propre pull-up interne).
+          NE JAMAIS HACHER L'ALIMENTATION d'un ventilateur 4 fils : cela détruit
+          le tachymètre.
+          Tachy : collecteur ouvert, pull-up vers 3.3 V JAMAIS vers 12 V,
+          + 4.7k série et clamp BAT54S (certains ventilateurs tirent vers 12 V).
+          Impulsion à 100 % pendant 500 ms au démarrage.
+        pins:
+          1: {net: GND_LOGIC, wire: noir_liseré}
+          2: {net: V12_AUX,   wire: jaune}
+          3: {net: FAN_TACH,  wire: jaune}
+          4: {net: FAN_PWM,   wire: bleu}
+
+      J19:
+        name: WS2812B_FRONT
+        function: "Bandeau LED avant"
+        type: "Molex Micro-Fit 3.0, 3 pos"
+        note: >
+          Niveau logique : WS2812B en 5 V exige VIH = 0.7 x VDD = 3.5 V.
+          Un GPIO ESP32 à 3.3 V est SOUS LE SEUIL -> SN74AHCT125 obligatoire
+          (VIH = 2.0 V à VCC = 5 V, verified).
+          470 Ohm série sur la donnée, 1000 uF à l'entrée du bandeau.
+          Branche 5 V dédiée et fusée : 60 mA/LED en blanc plein.
+        pins:
+          1: {net: V5_LED,   wire: orange, awg: "1.0 mm2"}
+          2: {net: LED_DATA, wire: jaune_liseré}
+          3: {net: GND_LOGIC, wire: noir_liseré}
+
+      J20:
+        name: WS2812B_REAR
+        type: "Molex Micro-Fit 3.0, 3 pos"
+        pinout_ref: "J19"
+
+      J21:
+        name: TEMP_SENSOR
+        function: "Capteur de température 3 broches"
+        status: to_measure
+        note: >
+          TYPE NON IDENTIFIÉ. Trois familles incompatibles possibles :
+          DS18B20 (1-Wire, pull-up 4.7k), LM35/TMP36 (analogique 10 mV/degC),
+          module NTC (diviseur intégré).
+          ENTRÉE À DOUBLE USAGE : empreintes 0 Ohm sélectionnant le mode.
+          La mesure ne bloque donc pas le PCB.
+        pins:
+          1: {net: V3V3,      wire: blanc}
+          2: {net: TEMP_DATA, wire: bleu}
+          3: {net: GND_LOGIC, wire: noir_liseré}
+
+# =============================================================================
+#  CARTE 2 — motor_interface  (2 moteurs, identique AV et AR)
+# =============================================================================
+
+  motor_interface:
+    rev: A
+    exemplaires_en_service: 2
+    lot: 5
+    layers: 4
+    stackup: "Signal / GND plein / Alim / Signal — recommandation Espressif"
+    mcu: "ESP32-DevKitC V4, 38 broches, sockets Mill-Max 310, entraxe 25.40 mm"
+    status: "bloquée par M7 ; M4 et M5 contournées par options de peuplement"
+    role_selection: "straps ROLE0/ROLE1 lus au boot — le PCB est identique AV et AR"
+
+    connectors:
+
+      J1_J2:
+        name: MOT_HALL_A / MOT_HALL_B
+        function: "Entrée capteurs Hall, côté MOTEUR"
+        type: "Molex Micro-Fit 3.0, 6 pos"
+        rating: {voltage_v: 600, lock: positif, status: verified}
+        keying: >
+          6 POSITIONS, alors que le connecteur d'origine en a 5.
+          Croisement avec un connecteur Hall 5 broches PHYSIQUEMENT IMPOSSIBLE.
+          Le JST PH d'origine n'a qu'un maintien PAR FRICTION (verified) —
+          inacceptable sur un robot qui vibre : un retrait partiel donne une
+          odométrie fausse intermittente, le pire mode de panne (§M.2-15).
+        placement: "bord GAUCHE de la carte, sérigraphie fond BLANC"
+        status_colours: to_measure
+        note: >
+          CODE COULEUR À REFAIRE AU MULTIMÈTRE, moteur par moteur.
+          Sources contradictoires : ODrive donne jaune/bleu/vert, MAD-EE donne
+          blanc/jaune/vert. Le tableau du README annonce "orange" côté contrôleur —
+          AUCUNE SOURCE NE MENTIONNE UN FIL ORANGE.
+          ODrive précise que l'ordre Ha/Hb/Hc peut être quelconque pourvu qu'il
+          soit STABLE et calibré. Ne pas faire dépendre la carte d'une couleur.
+        pins:
+          1: {net: V5_MOT,  wire: orange, note: "issu du ZS-X11H — AUCUNE PPTC sur ce chemin, voir passthrough_purity"}
+          2: {net: GND_MOT, wire: noir}
+          3: {net: HALL_A,  wire: "à mesurer"}
+          4: {net: HALL_B,  wire: "à mesurer"}
+          5: {net: HALL_C,  wire: "à mesurer"}
+          6: {net: NC,      note: "détrompage — ne pas câbler"}
+
+        passthrough_purity: >
+          CORRECTION v1.0. Le fichier plaçait une PPTC MF-MSMF010 (100 mA) EN SÉRIE
+          dans le chemin +5V_MOT, à l'intérieur d'un passthrough déclaré
+          "purement métallique". Trois problèmes :
+          (1) 100 mA de maintien / 300 mA de déclenchement derrière un 78L05
+              limité à 50 mA : elle ne se déclenchera JAMAIS avant la source.
+          (2) Elle ajoute jusqu'à 15 Ohm (R1max après déclenchement) sur
+              l'alimentation des capteurs Hall.
+          (3) Son ouverture coupe le retour Hall du variateur — exactement ce que
+              l'exigence dure interdit.
+          RÈGLE : le passthrough +5V_MOT et les trois lignes Hall sont
+          STRICTEMENT métalliques, aucun composant en série, jamais.
+          La protection ne porte que sur la DÉRIVATION vers la carte :
+          PPTC 30 mA (MF-MSMF014 ou équivalent) sur le seul piquage qui alimente
+          les résistances de tirage locales.
+
+      J3_J4:
+        name: CTRL_HALL_A / CTRL_HALL_B
+        function: "Sortie capteurs Hall, côté ZS-X11H — passthrough métallique"
+        type: "Molex Micro-Fit 3.0, 6 pos"
+        placement: "bord DROIT de la carte, sérigraphie fond JAUNE"
+        hard_requirement: >
+          PASSTHROUGH PUREMENT MÉTALLIQUE. Broche n vers broche n, pistes droites,
+          sans via si possible, 0.5 mm minimum.
+          Le tap est un STUB COURT sur la piste, jamais en série.
+          Si l'ESP32 est retiré, non alimenté ou défaillant, le lien
+          moteur -> contrôleur doit continuer de fonctionner.
+        pins:
+          1: {net: V5_MOT,  wire: orange}
+          2: {net: GND_MOT, wire: noir}
+          3: {net: HALL_A,  wire: "à mesurer"}
+          4: {net: HALL_B,  wire: "à mesurer"}
+          5: {net: HALL_C,  wire: "à mesurer"}
+          6: {net: NC}
+
+      J5_J6:
+        name: CTRL_CMD_A / CTRL_CMD_B
+        function: "Commande vers le ZS-X11H — VR, DIR, EL, STOP, NTC"
+        type: "Molex Micro-Fit 3.0, 8 pos"
+        keying: "8 positions — distinct des 6 pos Hall et des 6 pos CAN"
+        note: >
+          BLOC ABSENT DES DEUX README EXISTANTS. Sans lui, la carte ne fait que
+          la moitié de son travail et les signaux de commande restent en faisceau volant.
+        pins:
+          1: {net: VR,       wire: blanc,  note: "0-5 V, MCP4728 + TLV9062. 10k VERS GND au plus près du variateur — NON OPTIONNEL"}
+          2: {net: DIR,      wire: jaune,  note: "actif bas (consensus 2-1), DMG1012T drain ouvert"}
+          3: {net: EL_BRAKE, wire: violet_liseré, note: "ACTIF HAUT. Résistance de tirage 2,2 k vers 5V_BRAKE CÔTÉ VARIATEUR, sur le faisceau — voir brake_chain"}
+          4: {net: STOP,     wire: gris,   note: "actif bas = COAST, pas un freinage. COMMANDE SEULE, aucun rôle de sécurité"}
+          5: {net: GND_MOT,  wire: noir}
+          6: {net: NTC,      wire: bleu,   note: "NTC 10k sur dissipateur variateur, lu par ADS1115"}
+          7: {net: V5_BRAKE, wire: rose,   note: "5 V pris EN AMONT DU CONTACTEUR — survit à l'ouverture"}
+          8: {net: GND_MOT,  wire: noir}
+        safety_warning: >
+          DÉCOUVERTE CRITIQUE (voir 09-validation-composants.md, Y.4.3).
+          EL/BRAKE est ACTIF HAUT et STOP est ACTIF BAS = roue libre.
+          Conséquence : tirer /SAFE à la masse NE FREINE PAS — cela met les
+          drives en roue libre ET relâche le frein.
+          Le §H.7 du dossier suppose l'inverse et doit être corrigé.
+          PARADE OBLIGATOIRE : relais NORMALEMENT FERMÉ forçant EL/BRAKE à 5 V
+          quand sa bobine n'est plus alimentée. Bobine excitée par
+          (/SAFE relâché ET ESP32 vivant). Toute défaillance -> frein serré.
+          Un relais de signal + une diode de roue libre par moteur.
+
+      J7:
+        name: PWR_5V_IN
+        function: "Alimentation logique de la carte"
+        type: "Molex Micro-Fit 3.0, 4 pos"
+        protection: "cellule d'entrée standard — voir input_protection_cell"
+        note: >
+          NE JAMAIS alimenter l'ESP32 depuis le 5 V du ZS-X11H :
+          50 mA max (source unique) sur un 78L05, et des blocages rapportés.
+        pins:
+          1: {net: V5_LOGIC, wire: orange}
+          2: {net: V5_LOGIC, wire: orange}
+          3: {net: GND_LOGIC, wire: noir_liseré}
+          4: {net: GND_LOGIC, wire: noir_liseré}
+
+      J8:
+        name: CAN_SAFE_A
+        type: "Molex Micro-Fit 3.0, 6 pos"
+        pinout_ref: "CAN_SAFE_6P"
+
+      J9:
+        name: CAN_SAFE_B
+        type: "Molex Micro-Fit 3.0, 6 pos"
+        pinout_ref: "CAN_SAFE_6P"
+
+# =============================================================================
+#  CARTE 3 — safety_bus_distribution
+# =============================================================================
+
+  safety_bus_distribution:
+    rev: A
+    exemplaires_en_service: 1
+    lot: 5
+    layers: 4
+    mcu: "AUCUN — carte entièrement passive et protégée"
+    status: "AUCUNE MESURE BLOQUANTE — à fabriquer en premier"
+    rationale: >
+      Pas de microcontrôleur : rien à planter, rien à reflasher, rien à
+      diagnostiquer. Une carte de distribution qui embarque un MCU devient
+      un point de défaillance sur le chemin de la sécurité.
+
+    connectors:
+
+      J1:
+        name: TRUNK_IN
+        function: "Entrée dorsale depuis safety_power"
+        type: "Molex Micro-Fit 3.0, 6 pos"
+        pinout_ref: "CAN_SAFE_6P"
+
+      J2_J9:
+        name: NODE_1..8
+        function: "8 branches de nœuds"
+        type: "Molex Micro-Fit 3.0, 6 pos"
+        pinout_ref: "CAN_SAFE_6P"
+        allocation:
+          NODE_1: "ESP32-SAFETY (sur safety_power)"
+          NODE_2: "ESP32-MOTION AVANT"
+          NODE_3: "ESP32-MOTION ARRIÈRE"
+          NODE_4: "adaptateur USB-CAN gs_usb vers le X1"
+          NODE_5: "libre — évolution §A.4"
+          NODE_6: "libre"
+          NODE_7: "libre"
+          NODE_8: "banc de test / établi"
+        per_branch_protection:
+          power: "PPTC 1812L050/30 (30 V) ou eFuse TPS259573"
+          ground: >
+            PPTC 500 mA EN SÉRIE SUR LA MASSE CAN de chaque branche.
+            Sans elle : si la masse d'un nœud se débranche côté alimentation,
+            tout son courant de retour passe par un 0.5 mm2 prévu pour
+            quelques dizaines de mA. Il fond, ou il fait dériver toutes les masses.
+          esd: "NUP2105L sur CANH/CANL (clampe 40 V @ 5 A)"
+          common_mode: "TDK ACT45B-510-2P-TL003 (200 mA, DCR 1 Ohm)"
+          led: "1 LED verte de présence d'alimentation par branche"
+        stub_rule: "STUB MAX 30 cm — à sérigraphier sur la carte"
+
+      JP1_JP2:
+        name: TERM_A / TERM_B
+        function: "Terminaison 120 Ohm sélectionnable, aux deux extrémités"
+        type: "cavalier 2.54 mm + LED bleue de terminaison active"
+        implementation: >
+          TERMINAISON FENDUE : 2 x 60 Ohm avec CSPLIT au point milieu vers GND.
+          Réduit fortement les émissions de mode commun pour le prix d'un condensateur.
+          Valeur de CSPLIT à confirmer visuellement sur la figure 10-2 de la
+          datasheet TCAN1042HV — absente du texte, convention secteur 4.7 nF.
+        acceptance_test: >
+          Bus HORS TENSION, mesurer entre TP_CANH et TP_CANL :
+            60 Ohm  -> OK, exactement deux terminaisons
+            120 Ohm -> une seule terminaison
+            40 Ohm  -> trois terminaisons
+          À SÉRIGRAPHIER SUR LA CARTE.
+
+    test_points:
+      TP_CANH: "header 2.54 mm, groupe CANH/CANL/GND pour clip de sonde"
+      TP_CANL: ""
+      TP_SAFE: "ligne /SAFE — le signal le plus critique du robot"
+      TP_5V: ""
+      TP_GND: "plot ressort de sonde à côté de chaque groupe"
+
+# =============================================================================
+#  BROCHAGES PARTAGÉS
+# =============================================================================
+
+shared_pinouts:
+
+  CAN_SAFE_6P:
+    name: "CAN + /SAFE + alimentation de nœud"
+    type: "Molex Micro-Fit 3.0, 6 pos"
+    rating: {current_per_circuit_a: 5.5, awg: 20, voltage_v: 600, status: verified}
+    note: >
+      UN SEUL type de connecteur pour tout le réseau du robot.
+      Deux connecteurs en parallèle par nœud : le bus traverse sans stub.
+    pins:
+      1: {net: V5_LOGIC, wire: orange}
+      2: {net: CANH,     wire: vert,   note: "paire torsadée blindée"}
+      3: {net: CANL,     wire: brun}
+      4: {net: SAFE_N,   wire: violet, note: "actif bas, drain ouvert, câblage OU"}
+      5: {net: GND_LOGIC, wire: noir_liseré}
+      6: {net: SHIELD,   note: "blindage relié à la masse D'UN SEUL CÔTÉ, côté X1"}
+
+  SAFE_N_spec:
+    name: "Ligne /SAFE — spécification électrique"
+    polarity: "actif BAS"
+    topology: "drain ouvert, câblage OU"
+    rail: "3,3 V — PAS 5 V. Voir note level_shift ci-dessous"
+
+    pull_up:
+      location: "safety_power UNIQUEMENT — un seul dans tout le système"
+      value: "1 kOhm vers 3V3_HOTEL"
+      wiring: >
+        LE CONTACT NF DU CHAMPIGNON EST EN SÉRIE AVEC CE PULL-UP.
+        Champignon relâché  -> contact fermé -> pull-up connecté -> /SAFE haut  -> permissif
+        Champignon enfoncé  -> contact ouvert -> pull-up déconnecté -> les pull-downs
+                               ramènent la ligne à la masse -> état sûr
+        Fil du champignon coupé -> même effet -> état sûr
+      erratum: >
+        v1.0 de ce fichier disait "le contact NF tire la ligne à la masse".
+        C'EST FAUX : un contact NF est FERMÉ au repos, ce montage aurait maintenu
+        le robot en état sûr en permanence. Le contact est EN SÉRIE AVEC LE PULL-UP.
+
+    pull_down:
+      location: "safety_power UNIQUEMENT — un seul dans tout le système"
+      value: "10 kOhm vers GND"
+      rationale: >
+        SÉCURITÉ POSITIVE. Pull-up déconnecté, fil coupé, carte absente
+        -> la ligne tombe à la masse -> état sûr.
+      erratum: >
+        v1.0 mettait un pull-down de 10 kOhm SUR CHAQUE CARTE. AVEC 3 CARTES :
+        10k//10k//10k = 3,33 kOhm, et avec un pull-up de 4,7 kOhm le niveau haut
+        tombe à 2,07 V — SOUS le VIH de l'ESP32 (0,75 x 3,3 = 2,48 V).
+        LA LIGNE AURAIT ÉTÉ LUE BASSE EN PERMANENCE : freins jamais relâchés,
+        robot immobilisé, ou pire, état indéterminé au seuil.
+        Un seul pull-down, sur safety_power.
+      per_board: >
+        Chaque AUTRE carte met un pull-down FAIBLE de 1 MOhm, uniquement pour
+        définir l'état quand elle est débranchée du bus. 1 MOhm x 3 en parallèle
+        = 333 kOhm, sans effet sur le diviseur 1k/10k (erreur < 0,4 %).
+
+    level_check:
+      niveau_haut: "3,3 x 10k/(1k+10k) = 3,00 V  -> au-dessus du VIH 2,48 V, marge 0,52 V"
+      niveau_bas: "< 0,3 V (drain ouvert saturé) -> sous le VIL 0,825 V"
+      status: "calculé et vérifié — À REVALIDER si le nombre de nœuds change"
+
+    level_shift: >
+      La ligne est référencée 3,3 V, pas 5 V, précisément pour arriver
+      DIRECTEMENT sur un GPIO ESP32 sans adaptation.
+      Les entrées EL/BRAKE des ZS-X11H attendent 5 V : l'adaptation 3,3 -> 5 V
+      se fait sur motor_interface, par le relais NF (dont la bobine est en 5 V),
+      pas sur la ligne elle-même.
+
+    driven_low_by:
+      - "ouverture du contact NF du champignon (déconnexion du pull-up)"
+      - "drain ouvert de l'ESP32-SAFETY"
+      - "watchdog externe TPL5010 (RSTn, drain ouvert, pull-up obligatoire)"
+      - "ouverture du contact NF de l'e-stop radio (futur), en série lui aussi"
+
+    consumed_by:
+      - what: "entrée EL/BRAKE des 4 ZS-X11H"
+        via: "LE RELAIS NF de motor_interface — voir brake_chain"
+        role: "SÉCURITÉ — c'est le seul chemin de freinage"
+      - what: "entrées STOP des 4 ZS-X11H"
+        via: "GPIO de l'ESP32-MOTION, DMG1012T drain ouvert"
+        role: >
+          COMMANDE UNIQUEMENT, AUCUN RÔLE DE SÉCURITÉ.
+          Un ESP32 mort n'assertera jamais STOP. Ne jamais compter sur STOP
+          dans une analyse de sécurité.
+      - what: "entrées d'interruption des 2 ESP32-MOTION"
+        role: "information"
+
+  brake_chain:
+    name: "Chaîne de freinage fail-safe — spécification"
+    principle: >
+      Les entrées du ZS-X11H ne sont PAS fail-safe : STOP actif-bas donne une
+      roue libre, EL/BRAKE actif-haut se relâche à la moindre perte de signal.
+      Le freinage est obtenu par un relais NORMALEMENT FERMÉ qui force EL/BRAKE
+      à 5 V dès qu'il perd sa bobine.
+
+    wiring: |
+      ── SUR LE FAISCEAU, AU PLUS PRÈS DU VARIATEUR ──
+      5V_BRAKE ──[ 2,2 k ]──┬──► EL/BRAKE du ZS-X11H
+                            │
+      ── SUR motor_interface ──
+                            └──► drain du DMG1012T
+                                       │
+      GPIO26 ──┐                       │
+               ├─► 74LVC1G08 (ET) ─────┘ grille   + pull-down 100 k
+      /SAFE ───┘      alim 3V3                      sur la grille
+
+      MOSFET PASSANT  -> EL tiré bas  -> frein RELÂCHÉ  -> marche normale
+      MOSFET BLOQUÉ   -> EL tiré haut -> FREIN SERRÉ
+
+    no_relay: >
+      CHANGEMENT PAR RAPPORT À v1.0 : le relais NF est supprimé.
+      Une résistance de tirage vers 5V_BRAKE plus un MOSFET drain ouvert donnent
+      exactement la même logique fail-safe, sans pièce mécanique, sans courant de
+      bobine permanent, sans diode de roue libre, et pour un dixième du prix.
+      La porte ET 74LVC1G08 (alimentée en 3V3) réalise la condition matérielle :
+      sa sortie tombe à zéro si elle perd son alimentation, et le pull-down 100 k
+      sur la grille garantit l'état bloqué.
+
+    pull_up_location:
+      value: "SUR LE FAISCEAU, CÔTÉ VARIATEUR — pas sur motor_interface"
+      why: >
+        C'est le point décisif. Si la résistance de tirage est sur la carte et
+        qu'on débranche J5/J6, l'entrée EL/BRAKE du variateur devient FLOTTANTE,
+        et flottant = frein désactivé (mesure MAD-EE).
+        En la plaçant côté variateur, DÉBRANCHER LA CARTE SERRE LE FREIN.
+        C'est le seul placement qui rend ce mode de défaillance sûr.
+      value_choice: >
+        2,2 kOhm : 5/2,2k = 2,3 mA quand le MOSFET conduit. Absorbable même si
+        5V_BRAKE devait un jour être repris sur le 78L05 du variateur (50 mA).
+        Pas de risque de court-circuit franc — le défaut de la v1.0, où le contact
+        du relais et le MOSFET attaquaient le même noeud sans résistance série.
+
+    power_source:
+      net: "5V_BRAKE"
+      source: "safety_power, EN AMONT DU CONTACTEUR (rail 5V_HOTEL)"
+      reservoir: "2200 uF au plus près, sur motor_interface"
+      why: >
+        DÉFAUT CRITIQUE CORRIGÉ. Si 5V_BRAKE venait du 78L05 du ZS-X11H
+        (alimenté par le bus), alors à t = 1 s quand le contacteur s'ouvre,
+        le bus disparait -> le 78L05 s'arrete -> le contact NF se ferme sur un
+        RAIL MORT -> EL tiré bas par le 10 k -> FREIN RELÂCHÉ EXACTEMENT AU
+        MOMENT OÙ IL FAUT FREINER.
+        Le freinage ne doit jamais dépendre d'une tension que la séquence
+        d'arrêt supprime. D'où l'alimentation en amont du contacteur.
+      sizing: >
+        Le ZS-X11H doit encore pouvoir freiner APRÈS ouverture du contacteur,
+        sur l'énergie de ses propres condensateurs de bus.
+        A VALIDER PAR ESSAI : freinage à pleine vitesse, roues levées puis au sol,
+        contacteur ouvert à t = 1 s, mesurer la décélération réelle.
+
+    failure_modes:
+      - {event: "champignon enfoncé",        result: "pull-up déconnecté -> /SAFE bas -> bobine coupée -> FREIN", ok: true}
+      - {event: "perte du 5V logique",       result: "bobine coupée -> FREIN", ok: true}
+      - {event: "ESP32 planté",              result: "TPL5010 -> /SAFE bas -> bobine coupée -> FREIN", ok: true}
+      - {event: "ESP32 retiré du support",   result: "GPIO26 flottant -> pull-down 100k sur la grille -> MOSFET bloqué -> FREIN", ok: true}
+      - {event: "cable /SAFE coupé",         result: "pull-up déconnecté -> ET à zéro -> FREIN", ok: true}
+      - {event: "perte du 3V3 (porte ET)",   result: "sortie du 74LVC1G08 à zéro -> FREIN", ok: true}
+      - {event: "carte motor_interface débranchée", ok: true,
+         result: "la résistance de tirage est CÔTÉ VARIATEUR -> EL reste tiré haut -> FREIN",
+         note: "corrigé par le déplacement du pull-up sur le faisceau — v1.0 ne freinait pas dans ce mode"}
+      - {event: "ouverture du contacteur",   ok: conditional,
+         result: "5V_BRAKE survit (amont contacteur) -> EL reste haut -> commande de frein maintenue",
+         note: "⚠️ MAIS le variateur doit encore avoir l'énergie de freiner sur ses propres
+                condensateurs de bus. À VALIDER PAR ESSAI, pas à supposer."}
+
+    honesty_note: >
+      v1.0 de ce dossier affirmait "c'est le seul montage où TOUTE défaillance
+      conduit au freinage". C'était faux sur deux modes : carte débranchée, et
+      ouverture du contacteur. Le premier est corrigé (pull-up côté variateur),
+      le second est CONDITIONNEL — la commande de frein est maintenue, mais la
+      capacité physique à freiner dépend de l'énergie restante dans le variateur.
+      Ne pas revendiquer plus que ce que le montage tient.
+
+    validation_test:
+      what: "Freinage après ouverture du contacteur"
+      how: >
+        Robot sur cales, puis au sol. Lancer à pleine vitesse, déclencher l'arrêt
+        d'urgence, chronométrer la décélération avec et sans ouverture du contacteur
+        à t = 1 s. Mesurer la distance d'arrêt réelle.
+      why: "C'est le seul moyen de savoir si la temporisation de 1 s est bien dimensionnée"
+      blocks: "la validation de la chaîne de sécurité complète"
+
+  input_protection_cell:
+    name: "Cellule d'entrée protégée — identique sur les trois cartes"
+    rationale: "La défaillance ou le mauvais branchement d'un module ne doit pas endommager le reste"
+    chain:
+      1: {block: "eFuse ou PPTC", note: "limitation de courant réarmable"}
+      2: {block: "MOSFET P série", note: "anti-inversion, ~10 mOhm"}
+      3: {block: "TVS", note: "transitoires, ESD"}
+      4: {block: "OVLO série", note: "OUVRE au-dessus du seuil — un TVS seul ne survit pas à du continu"}
+      5: {block: "ferrite + 10 uF + 100 nF"}
+      6: {block: "LED verte + 10 k", note: "présence de rail, DIRECTEMENT sur le rail"}
+    per_rail:
+      "42V": {ovlo: "45 V", tvs: SMCJ43A, efuse: TPS26630, status: verified}
+      "12V": {ovlo: "15.5 V", tvs: SMBJ13A, efuse: TPS259573, pptc: "1812L050/30", status: verified}
+      "5V":  {ovlo: "6.0 V", tvs: SMAJ5.0A, note: "SMAJ5.0A : fuite 800 uA, non négligeable sur rail peu chargé"}
+
+# =============================================================================
+#  AFFECTATION DES GPIO — motor_interface
+# =============================================================================
+
+gpio_allocation:
+
+  motor_interface:
+    module: "ESP32-DevKitC V4 38 broches"
+    forbidden:
+      GPIO6_11: "flash SPI intégrée (CLK/SD0/SD1/SD2/SD3/CMD). AUCUNE CONNEXION. Sérigraphie 'NC — FLASH'"
+      GPIO12: >
+        MTDI — strapping VDD_SDIO. Un pull-up externe force la flash à 1.8 V
+        et LE MODULE NE DÉMARRE PLUS. Symptôme muet et déroutant.
+        NON UTILISÉ SUR CETTE CARTE, par précaution.
+      GPIO37_38: "non sorties sur WROOM-32"
+    reserved:
+      GPIO1_TX: "console USB — laissée libre pour le flashage sans démontage"
+      GPIO3_RX: "idem"
+      GPIO0: "bouton boot — NC"
+      GPIO2: "NC — un pull-up externe empêcherait le download boot"
+
+    assignments:
+      GPIO5:  {net: CAN_TX,     note: "strapping, doit être HAUT au boot -> pull-up 10k vers 3V3"}
+      GPIO4:  {net: CAN_RX,     note: "TCAN1042HV. STB DOIT ÊTRE TIRÉ À GND (pull-up interne = standby)"}
+      GPIO21: {net: I2C_SDA,    note: "MCP4728 + ADS1115"}
+      GPIO22: {net: I2C_SCL,    note: ""}
+      GPIO34: {net: HALL_A1,    note: "entrée seule — sortie push-pull du LVC3G17, aucun pull externe requis"}
+      GPIO35: {net: HALL_B1,    note: "entrée seule"}
+      GPIO36: {net: HALL_C1,    note: "entrée seule (SENSOR_VP)"}
+      GPIO39: {net: HALL_A2,    note: "entrée seule (SENSOR_VN)"}
+      GPIO32: {net: HALL_B2,    note: ""}
+      GPIO33: {net: HALL_C2,    note: ""}
+      GPIO25: {net: DIR_1,      note: "DMG1012T drain ouvert — PAS de 2N7002"}
+      GPIO14: {net: DIR_2,      note: ""}
+      GPIO27: {net: STOP_1,     note: "commande seule, aucun rôle de sécurité"}
+      GPIO23: {net: STOP_2,     note: "séparés par roue : permet de désactiver UNE roue en mode DEGRADED (§M.4)"}
+      GPIO26: {net: BRAKE_RELEASE, note: "COMMUN AUX DEUX ROUES. Entrée de la porte ET 74LVC1G08. Pull-down 100k obligatoire"}
+      GPIO19: {net: SAFE_N_IN,  note: "interruption. Ligne référencée 3V3, pull-down faible 1M local"}
+      GPIO18: {net: WD_DONE,    note: "TPL5010 — reconnu sur transition BAS->HAUT, >= 20 ms avant le prochain WAKE"}
+      GPIO13: {net: WD_WAKE,    note: "TPL5010 — impulsion de 20 ms au début de chaque intervalle"}
+      GPIO15: {net: LED_STATUS, note: "LED anode->3V3 via R, cathode->GPIO. Pull-up interne = LED éteinte au boot, log de boot préservé"}
+
+    spare:
+      GPIO16: {status: conditional, blocked_by: P3, note: "INUTILISABLE sur variante D0WDR2-V3 (PSRAM). Réserve conditionnelle"}
+      GPIO17: {status: conditional, blocked_by: P3, note: "idem"}
+      GPIO0:  {status: reserve_contrainte, note: "bouton boot — récupérable si un pull-up est maintenu"}
+      GPIO2:  {status: reserve_contrainte, note: "récupérable si aucun pull-up externe (sinon download boot impossible)"}
+      count: "2 réserves inconditionnelles (16/17 si non-PSRAM) + 2 réserves contraintes"
+
+    role_selection:
+      method: "diviseur résistif lu par l'ADS1115, canal 2 — PAS par GPIO"
+      why: >
+        CORRECTION v1.1 : les straps ROLE0/ROLE1 étaient sur GPIO16/17, qui sont
+        INUTILISABLES sur les variantes PSRAM. Un diviseur résistif sur un canal
+        ADS1115 donne 4 rôles sur UNE entrée, supprime la dépendance à P3, et
+        libère deux GPIO pour le watchdog — qui en avait besoin et n'en avait pas.
+      encoding: "0 V = AVANT | 1/3 Vref = ARRIÈRE | 2/3 Vref = réservé | Vref = banc de test"
+
+    erratum_v1_0: >
+      La v1.0 de ce fichier affectait 21 GPIO sur 21 utilisables : ZÉRO réserve,
+      et AUCUNE broche pour le watchdog TPL5010 dont dépend pourtant toute la
+      chaîne de freinage. La note "il reste assez de broches" était fausse.
+      Corrections : EL_1/EL_2 fusionnés en BRAKE_RELEASE commun (le freinage est
+      une fonction de sécurité globale, pas par roue), ROLE déplacé sur l'ADS1115,
+      WD_DONE et WD_WAKE ajoutés.
+
+    design_notes:
+      hall_inputs: >
+        Les 4 broches entrée-seule (34/35/36/39) sont utilisées pour les Hall.
+        C'est possible SANS pull externe parce que la sortie du SN74LVC3G17 est
+        PUSH-PULL. Un pull externe serait obligatoire si l'entrée était pilotée
+        en drain ouvert.
+      adc: >
+        AUCUN ADC de l'ESP32 n'est utilisé. Les 2 NTC passent par un ADS1115 en I2C.
+        Cela libère les broches ADC1 pour les Hall, évite la non-linéarité de l'ADC
+        ESP32, et écarte l'erratum d'interruptions parasites sur GPIO36/39 en
+        présence d'ADC actif.
+      mcp4728_ldac: >
+        LDAC câblé à GND en permanence : mise à jour immédiate, pas de
+        reprogrammation d'adresse nécessaire (un seul DAC par carte).
+        EEPROM À PROGRAMMER À 0 EN PRODUCTION -> sortie VR nulle dès la mise
+        sous tension, avant même le démarrage du firmware. Étape de recette.
+      mcp4728_fullscale: >
+        Pour atteindre 5.0 V : VREF = VDD avec VDD = 5 V.
+        La référence interne plafonne à 4.096 V même en gain x2.
+
+# =============================================================================
+#  MESURES BLOQUANTES
+# =============================================================================
+
+blocking_measurements:
+  P1:
+    what: "Entraxe des deux rangées du module ESP32, au pied à coulisse"
+    why: >
+      Le plan Espressif ne légende AUCUNE cote. 25.40 mm (1.0 pouce) est établi
+      par géométrie. Le README motor_interface annonce 22.86 mm — c'est
+      l'entraxe des cartes TIERCES 30 broches, qu'Espressif ne documente pas.
+      Un PCB percé à 22.86 n'acceptera jamais une DevKitC V4.
+    blocks: [motor_interface, safety_power]
+  P2:
+    what: "Ordre des broches au multimètre sur LE module réel"
+    method: "continuité 5V <-> VBUS USB ; 3V3 <-> sortie régulateur ; GND <-> blindage USB"
+    blocks: [motor_interface, safety_power]
+  P3:
+    what: "Variante exacte du module : D0WD-V3 ou D0WDR2-V3 (PSRAM) ?"
+    why: "Sur la variante PSRAM, GPIO16 est inutilisable — or ROLE0 et l'UART BMS y sont"
+    blocks: [motor_interface, safety_power]
+  M4:
+    what: "Polarité réelle de EL/BRAKE et STOP sur TES cartes"
+    status: "consensus fort disponible (actif haut / actif bas) mais >= 2 révisions matérielles"
+    mitigation: "étage de sortie agnostique en polarité — le PCB n'est plus bloqué, seul le peuplement l'est"
+    blocks: [firmware, peuplement]
+  M5:
+    what: "Cavalier J1 : à ponter ou à retirer ?"
+    status: "CONTRADICTION DIRECTE entre deux sources"
+    mitigation: "option B du §H.3 (DAC + ampli) retenue — J1 devient sans objet"
+    blocks: []
+  M7:
+    what: "Niveau, impédance et type de sortie des lignes Hall et de SC"
+    status: "AUCUNE SOURCE. Aucun chiffre publié nulle part"
+    also: "vérifier au multimètre que les Hall sont bien à collecteur ouvert — certains clones 41F sont push-pull"
+    blocks: [motor_interface]
+  M1:
+    what: "Seuil de coupure en courant du BMS"
+    safety: "fusible 40 A en série, pack <= 50 % SOC, hors habitation, sable sec ou extincteur classe D"
+    blocks: [safety_power]
+  M2:
+    what: "Résistance interne du pack -> courant de court-circuit prospectif"
+    blocks: [safety_power]
+  M10:
+    what: "Capacité totale d'entrée du bus"
+    blocks: [safety_power]
+  M12:
+    what: "Marquage des condensateurs d'entrée des ZS-X11H"
+    why: "Si 50 V, le hacheur de freinage passe de recommandé à OBLIGATOIRE"
+    blocks: [safety_power]
+  PACK_ID:
+    what: "Photographier l'étiquette du pack ET celle du BMS"
+    why: >
+      Le README dit 10INR19/66-4 (Pro, 474 Wh, 10S4P).
+      Le dossier v1.1 dit 10INR19/66-3 (Classic, 280 Wh, 10S3P).
+      Change le budget de courant, l'autonomie, et peut-être le protocole BMS.
+    blocks: [safety_power]
