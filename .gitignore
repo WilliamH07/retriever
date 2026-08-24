@@ -1,7 +1,12 @@
 # ROS 2 / colcon
-build/
-install/
-log/
+# Anchored on purpose: an unanchored "build/" matches ANY directory named
+# build at any depth, which silently swallowed docs/images/build.
+/build/
+/install/
+/log/
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
 .colcon*
 
 # Python
