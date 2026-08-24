@@ -1,48 +1,57 @@
 # Mechanical design
 
-Aluminium extrusion frame, laser cut panels, 3D printed mounts.
+Aluminium extrusion frame, laser cut panels, 3D printed mounts. The design is
+complete and the parts are made; this folder holds the files they were made
+from.
 
 ```
-source/     native CAD files
-step/       STEP exports, for anyone using a different tool
+dxf/        laser cutting profiles, one file per flat part
 stl/        printable parts, ready to slice
-dxf/        laser cutting profiles
+step/       STEP exports, for anyone using a different CAD tool
+source/     native CAD files
 ```
 
-Print settings, material and post processing notes for each printed part
-belong in this README as the parts are finalised.
+## Laser cut panels
 
-## Parts released so far
+Six flat parts make up the body and the decks. All are cut from sheet, and all
+are in `dxf/`.
 
-| File | Part | Process | Notes |
-|---|---|---|---|
-| `dxf/upper-deck-550x276.dxf` | Upper deck | Laser cut | 550 x 276 mm, M4 grid at 25 mm pitch, 181 holes, two cable slots. See the thickness note below |
-| `stl/deck-bracket-standard.stl` | Deck bracket, standard | 3D print | 4 off. 100 x 30 x 69 mm, ~55 g in PETG |
-| `stl/deck-bracket-rear.stl` | Deck bracket, rear station | 3D print | 2 off. Shelf offset 35 mm forward to clear the fan mounts |
-
-### Upper deck, thickness
-
-The deck sits on six supports, the largest span being 270 x 276 mm. Under 8 kg
-distributed:
-
-| Material | Immediate deflection | With creep |
+| File | Part | Material |
 |---|---|---|
-| PMMA 3 mm | 8.8 mm | ~18 mm |
-| PMMA 6 mm | 1.1 mm | ~2.2 mm |
-| Aluminium 3 mm | 0.4 mm | 0.4 mm |
+| `ETG_Plateau_superieur_PMMA_3mm.dxf` | Upper deck | PMMA, 3 mm |
+| `Plancher.dxf` | Floor of the payload bay | |
+| `Panneau_AVANT.dxf` | Front panel | |
+| `Panneau_ARRIERE.dxf` | Rear panel | |
+| `Panneau_lateral_DROIT.dxf` | Right side panel and wheel arch | |
+| `Panneau_lateral_GAUCHE.dxf` | Left side panel and wheel arch | |
 
-3 mm PMMA is not usable here: the deflection becomes permanent, which is a
-property of the material and not of the cut. The DXF is unchanged whichever
-thickness is ordered, only the M4 screw length changes.
+The side panels carry the wheel arches, so their outline is what sets the
+wheelbase and the track. Change one and the URDF in
+[`ros2_ws/src/retriever_description`](../../ros2_ws/src/retriever_description)
+has to follow.
 
-PMMA is also Euroclass E, it ignites easily and drips while burning, directly
-above the 37 V compartment. Polycarbonate is self extinguishing and cuts on the
-same machine; aluminium settles both the stiffness and the fire question.
+Material and thickness are recorded in the file name where they matter. Fill in
+the blanks in the table above as each part is confirmed.
 
-### Deck brackets
+## Printed parts
 
-Print flat on the back face, the one that meets the extrusion. Build height
-30 mm, no supports, and the layers then work the right way at the shelf root.
-PETG or ASA, 4 perimeters, 40 % infill. Two M8 hammer nuts per bracket: one
-alone lets the bracket rotate, and it is the couple between the two screws that
-carries the shelf moment.
+The corner brackets, the deck brackets, the wheel mounts, the fan housing and
+the front section are printed. STL files go in `stl/`.
+
+For each part, note here the material, the layer height, the wall count and
+the infill actually used, not the ones intended. A printed bracket that holds a
+35 kg machine is a structural part, and the print settings are part of the
+specification.
+
+## Frame
+
+The frame is aluminium extrusion, cut and drilled by hand. Lengths and the
+drilling pattern belong in `source/`, with the extrusion profile and the corner
+connector reference recorded here once confirmed.
+
+## Renders
+
+The renders in [`docs/images`](../../docs/images) are produced from this model
+by a Fusion 360 script that fixes the camera, the visual style and the
+visibility of each assembly group. A regenerated set is directly comparable to
+the current one.

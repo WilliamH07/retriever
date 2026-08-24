@@ -2,6 +2,7 @@
 //  RETRIEVER : SPONSORSHIP DOSSIER
 //  Compile:  typst compile dossier.typ
 //  Online:   upload this file to https://typst.app
+//  Images are read from ../images/ relative to this file.
 // ============================================================
 
 #let PROJECT   = "Retriever"
@@ -9,15 +10,87 @@
 #let AUTHOR    = "William Hanczyk"
 #let SCHOOL    = "KEDGE Business School"
 #let CITY      = "Bordeaux, France"
-#let EMAIL     = "[YOUR EMAIL]"
-#let GITHUB    = "github.com/[YOUR HANDLE]/retriever"
+#let EMAIL     = "wcontact33@gmail.com"
+#let GITHUB    = "github.com/WilliamH07/retriever"
 #let DATED     = "August 2026"
 
+// Cover: warm diagonal gradient, dark. Renders are keyed out so they float on it.
+#let COVER = gradient.linear(
+  angle: 45deg,
+  (rgb("#7A4212"), 0%),
+  (rgb("#341F10"), 30%),
+  (rgb("#150F0E"), 62%),
+  (rgb("#08070A"), 100%),
+)
+#let IMG       = "../images/"
+#let CUT       = "../images/cover/"
+#let BLD       = "../images/build/"
+
 #set document(title: PROJECT + ", Sponsorship Dossier", author: AUTHOR)
-#set page(paper: "a4", margin: (x: 1.7cm, top: 1.8cm, bottom: 1.8cm))
-#set text(font: ("Latin Modern Roman", "Liberation Serif"), size: 10pt, lang: "en")
+#set page(paper: "a4", margin: (x: 1.7cm, top: 1.8cm, bottom: 1.8cm), fill: COVER)
+#set text(font: ("Latin Modern Roman", "Liberation Serif"), size: 10pt, lang: "en",
+          fill: white)
 #set par(justify: true, leading: 0.58em)
 #set text(hyphenate: false)
+
+#let ph(h, cap) = none
+
+// ==========================================================================
+//  COVER
+// ==========================================================================
+
+#image(CUT + "01-hero-front-right.png", width: 100%)
+
+#v(0.9cm)
+
+#block[
+  #set text(font: "Latin Modern Sans", fill: white)
+  #text(size: 27pt, weight: "bold")[#PROJECT]
+  #v(-0.3em)
+  #text(size: 12.5pt, fill: rgb("#E4D9C8"))[#TAGLINE]
+  #v(0.5em)
+  #text(size: 10pt, fill: rgb("#A2968A"))[Sponsorship dossier #sym.dot.c Technical project brief]
+]
+
+#v(0.9cm)
+
+#grid(columns: (1fr, 1fr), gutter: 1cm,
+  [
+    #set text(size: 9pt, fill: rgb("#DCD3C6"))
+    #AUTHOR \
+    #SCHOOL \
+    #CITY \
+    #v(0.4em)
+    #EMAIL \
+    #GITHUB
+  ],
+  [
+    #set text(size: 9pt, fill: rgb("#A2968A"))
+    #DATED \
+    Version 1.0 \
+    #v(0.4em)
+    Hardware and software released under \
+    an open source licence.
+  ]
+)
+
+#v(1fr)
+
+#grid(columns: (1fr, 1fr, 1fr), gutter: 0.35cm, align: center + bottom,
+  image(CUT + "03-low-angle.png", height: 2.9cm),
+  image(CUT + "12-wheel-mount.png", height: 2.9cm),
+  image(CUT + "11-bare-frame.png", height: 2.9cm),
+)
+
+// ==========================================================================
+//  BODY, back to a light page
+// ==========================================================================
+
+#set page(fill: white, columns: 2, footer: context [
+  #set text(size: 7.5pt, fill: luma(110), font: "Latin Modern Sans")
+  #grid(columns: (1fr, auto), PROJECT + ", sponsorship dossier", counter(page).display())
+])
+#set text(fill: black)
 
 #show heading.where(level: 1): it => block(width: 100%, above: 1.4em, below: 0.7em)[
   #set text(font: "Latin Modern Sans", size: 11.5pt, weight: "bold")
@@ -29,79 +102,14 @@
   #set text(font: "Latin Modern Sans", size: 9.8pt, weight: "bold")
   #it.body
 ]
-
-#let ph(h, cap) = figure(
-  rect(width: 100%, height: h, fill: luma(234), stroke: 0.5pt + luma(175),
-    align(center + horizon,
-      text(size: 7.5pt, fill: luma(105), font: "Latin Modern Sans",
-        "PHOTO : " + cap))),
-  caption: text(size: 7.5pt, cap),
-)
 #show figure.caption: set text(size: 7.5pt, fill: luma(70))
 
+#let fig(f, cap) = figure(
+  image(IMG + f, width: 100%),
+  caption: text(size: 7.5pt, cap),
+)
+
 #let kv(a, b) = (text(fill: luma(80), a), b)
-
-// ==========================================================================
-//  COVER
-// ==========================================================================
-
-#rect(width: 100%, height: 8.4cm, fill: luma(234), stroke: 0.5pt + luma(175),
-  align(center + horizon,
-    text(size: 9pt, fill: luma(105), font: "Latin Modern Sans",
-      "HERO PHOTO : the chassis on the workbench, 3:2 landscape")))
-
-#v(0.8cm)
-
-#block[
-  #set text(font: "Latin Modern Sans")
-  #text(size: 27pt, weight: "bold")[#PROJECT]
-  #v(-0.3em)
-  #text(size: 12.5pt, fill: luma(80))[#TAGLINE]
-  #v(0.5em)
-  #text(size: 10pt, fill: luma(60))[Sponsorship dossier #sym.dot.c Technical project brief]
-]
-
-#v(1.4cm)
-
-#grid(columns: (1fr, 1fr), gutter: 1cm,
-  [
-    #set text(size: 9pt)
-    #AUTHOR \
-    #SCHOOL \
-    #CITY \
-    #v(0.4em)
-    #EMAIL \
-    #GITHUB
-  ],
-  [
-    #set text(size: 9pt, fill: luma(70))
-    #DATED \
-    Version 1.0 \
-    #v(0.4em)
-    Hardware and software released under \
-    an open source licence.
-  ]
-)
-
-#v(1fr)
-
-#grid(columns: (1fr, 1fr, 1fr), gutter: 0.4cm,
-  rect(width: 100%, height: 3.6cm, fill: luma(238), stroke: 0.5pt + luma(180),
-    align(center + horizon, text(size: 7pt, fill: luma(110), font: "Latin Modern Sans", "CAD render"))),
-  rect(width: 100%, height: 3.6cm, fill: luma(238), stroke: 0.5pt + luma(180),
-    align(center + horizon, text(size: 7pt, fill: luma(110), font: "Latin Modern Sans", "3D printed parts"))),
-  rect(width: 100%, height: 3.6cm, fill: luma(238), stroke: 0.5pt + luma(180),
-    align(center + horizon, text(size: 7pt, fill: luma(110), font: "Latin Modern Sans", "Aluminium frame"))),
-)
-
-// ==========================================================================
-//  BODY
-// ==========================================================================
-
-#set page(columns: 2, footer: context [
-  #set text(size: 7.5pt, fill: luma(110), font: "Latin Modern Sans")
-  #grid(columns: (1fr, auto), PROJECT + ", sponsorship dossier", counter(page).display())
-])
 
 = Project overview
 
@@ -125,7 +133,41 @@ written before the first part was cut, a documented failure mode analysis, a
 hardware safety chain that no software can override, and a build plan with a
 measurable exit criterion at every stage.
 
-#ph(4.2cm, "The chassis under assembly")
+#fig("02-hero-rear-left.png", "Rear three quarter view of the current assembly")
+
+= The goal
+
+The goal is a robot that can be given a destination and reach it on its own:
+outdoors, on ground nobody prepared for it, carrying a load on its deck, with
+no operator in the loop and no track to follow.
+
+That target is deliberately narrow, because it is the one that forces every
+hard problem to be solved at once. Outdoors means the sensors have to work in
+sunlight and the localisation has to survive without walls to map. Unprepared
+ground means the drivetrain has to have torque in reserve and the navigation
+has to react to obstacles that appear on no map. No operator means the machine
+has to decide, on its own, when to stop.
+
+Success is defined by things that can be measured rather than demonstrated:
+
+#table(
+  columns: (auto, 1fr),
+  stroke: none,
+  inset: (x: 0pt, y: 3.2pt),
+  column-gutter: 0.9em,
+  ..kv("Navigation", "Reach a GNSS waypoint outdoors, autonomously, and report arrival"),
+  ..kv("Obstacles", "Detect and avoid an obstacle that is on no map, while under way"),
+  ..kv("Speed", "1.5 m/s sustained"),
+  ..kv("Endurance", "70 minutes of continuous operation on one charge"),
+  ..kv("Safety", [Come to a stop in under 500 ms on loss of radio link, loss of
+       computer, loss of a controller, or the emergency stop, every time]),
+  ..kv("Openness", "Reproducible by someone else from the published files alone"),
+)
+
+The last line is not decoration. A robot that only works in the hands of the
+person who built it has not been engineered, it has been fiddled with until it
+ran. The whole documentation discipline described below exists to make the
+difference measurable.
 
 = Technical specification
 
@@ -150,6 +192,9 @@ measurable exit criterion at every stage.
   ..kv("Licence", "Open hardware and software"),
 )
 
+
+#pagebreak()
+
 = System architecture
 
 Three decisions define the platform.
@@ -173,7 +218,8 @@ stop wired in series with the main DC contactor coil. The last two levels
 contain no code at all. No software, no microcontroller and no logic supply
 can hold that contactor closed once the mushroom button is pressed.
 
-#ph(4.6cm, "System block diagram")
+
+#colbreak()
 
 = Where the project stands
 
@@ -182,9 +228,11 @@ covering electrical design, communications, ROS 2 architecture, safety,
 network, code organisation, test strategy and a costed bill of materials. The
 mechanical design is finished in CAD.
 
-*Construction has started.* The structural parts are cut and the frame is
-going together: an aluminium extrusion chassis, laser cut panels, and 3D
-printed mounts for the electronics, sensors and battery.
+*Construction is well under way.* The aluminium extrusion frame is assembled,
+the printed body panels and wheel arches are fitted, the four hub motors are
+mounted, the battery pack sits in its compartment and the cooling fans are in
+place. What remains before the power chain can be energised is the protection
+and switching hardware, and the wiring.
 
 #block(breakable: false)[
 #table(
@@ -214,39 +262,90 @@ and then does something once it arrives. The architecture was designed for
 this from the start. Adding a sixth node to the CAN bus takes two wires and a
 busbar tap, not a rewire.
 
-#ph(4.2cm, "3D printed mounts and laser cut panels")
+
+
+
+#pagebreak()
+
+#page(columns: 1)[
+  #heading(level: 1)[Design and build]
+
+  #grid(columns: (1fr, 1fr), gutter: 12pt, row-gutter: 16pt,
+    figure(image(CUT + "01-hero-front-right.png", width: 100%),
+      caption: text(size: 8pt)[The CAD model of the finished platform]),
+    figure(image(BLD + "p1-rolling-chassis.jpg", width: 100%),
+      caption: text(size: 8pt)[The same machine on the bench, with the battery
+        pack and the four hub motors fitted]),
+    figure(image(IMG + "15-electronics-bay.png", width: 100%),
+      caption: text(size: 8pt)[Exploded view with the body panels removed:
+        the two decks, their brackets and the extrusion frame]),
+    figure(image(BLD + "p2-interior-cooling.jpg", width: 100%),
+      caption: text(size: 8pt)[The assembled base, with the front section and
+        the two cooling fans in place]),
+    figure(image(CUT + "11-bare-frame.png", width: 100%),
+      caption: text(size: 8pt)[The extrusion frame alone, with the upper deck
+        and its fasteners exploded]),
+    figure(image(BLD + "p3-hub-motors.jpg", width: 100%),
+      caption: text(size: 8pt)[Drilling an extrusion for a bracket]),
+  )
+
+  #v(0.8em)
+  #set par(justify: true)
+  #text(size: 9.5pt)[
+    Every part of the frame is cut, drilled and printed by hand. The renders on
+    the left of each pair are not illustrations made after the fact: they are
+    the files the parts were made from, and they are published with the rest of
+    the project.
+  ]
+]
 
 = Looking for sponsors
 
-I am looking for partners to help acquire the three items below. Each is
-described by its minimum specification rather than by a product reference, so
-that a sponsor can propose whatever suits them best. Support in kind,
-a discount, or a straightforward contribution are all equally welcome.
+Four things stand between the platform as it is today and a robot that works
+outdoors on its own. If one of them is something you make, or something you
+could help with, I would be glad to talk.
 
-== 1. Printed circuit boards
+*Printed circuit boards.* Three boards are being designed in EasyEDA: a motor
+driver interface, a safety and power management board, and a CAN distribution
+board. They need making.
 
-Three custom boards are currently being designed in EasyEDA: a motor driver
-interface, a safety and power management board, and a CAN distribution board.
-The project needs them fabricated as 2 layer and 4 layer prototypes. All files
-will be released openly.
+*Embedded AI compute.* The current x86 board runs the navigation stack, but
+not the perception that outdoor autonomy asks for.
 
-== 2. Embedded AI compute
+*An outdoor 3D LiDAR.* The blocking item. The 2D LiDAR on hand is specified for
+indoor use, and direct sunlight saturates its receiver.
 
-The current x86 board runs the navigation stack but cannot support real time
-inference for outdoor perception. The project needs one embedded AI
-development kit of the 8 GB class, to handle visual obstacle classification
-and terrain segmentation.
+*A depth camera.* The Kinect v2 on hand measures depth by active infrared, so
+it is blind in daylight, and its driver has been unmaintained since 2021.
 
-== 3. Outdoor 3D LiDAR
+#v(0.3em)
 
-This is the blocking item. The 2D LiDAR currently on hand is specified for
-indoor use only: its datasheet gives a 0 to 2000 lux test envelope and no IP
-rating, while direct sunlight reaches 100 000 lux and saturates the receiver.
-Outdoor autonomy is not achievable with it.
+#table(
+  columns: (auto, 1fr),
+  stroke: (x: none, y: 0.4pt + luma(200)),
+  inset: (x: 0pt, y: 4pt),
+  column-gutter: 0.9em,
+  table.header(
+    text(weight: "bold", size: 8.5pt)[Item],
+    text(weight: "bold", size: 8.5pt)[What it has to do]),
+  [PCBs], [Three boards, 2 and 4 layer prototypes],
+  [Compute], [Run perception on board, 8 GB class],
+  [3D LiDAR], [30 m, 360#sym.degree, works in direct sunlight],
+  [Camera], [Stereo depth in daylight, ROS 2 driver],
+)
 
-The project needs one 3D LiDAR with 30 m range or better, a 360#sym.degree
-horizontal field of view, specified sunlight immunity, and an available ROS 2
-driver.
+#v(0.4em)
+
+That is the whole gap: somewhere around a thousand euros of hardware between
+the robot as it stands and a robot that works outdoors on its own.
+
+Hardware is the simplest form of support, but a contribution towards buying one
+of these items is just as welcome, and I am glad to buy whichever model you
+would rather see on the robot. I am not asking for a particular product. If you
+would rather propose something from your own range, a discount, or simply
+advice on what would suit, that is just as useful to me.
+
+#colbreak()
 
 = What a sponsor receives
 
@@ -269,6 +368,8 @@ documentation is where a sponsor gets value.
        the robot rather than on a desk. Shared privately first.]),
 )
 
+#colbreak()
+
 = About
 
 I am William Hanczyk, a business student at KEDGE Business School in Bordeaux.
@@ -286,19 +387,29 @@ The project is deliberately open. Its purpose is to show that a rigorous,
 safety first mobile robot can be built and documented outside a laboratory,
 and to leave behind something the next person can reproduce.
 
-#v(0.6em)
-#line(length: 100%, stroke: 0.6pt + luma(120))
-#v(0.3em)
+#colbreak()
 
-#text(size: 8.6pt)[
-  *Contact* #h(0.5em) #AUTHOR #sym.dot.c #EMAIL #linebreak()
-  #h(3.1em) #GITHUB
-]
+= Plan view, drawn and built
 
-#v(0.5em)
-#text(size: 7.5pt, fill: luma(105))[
-  Inspired by the Clearpath Husky platform. Mechanical design modelled from
-  scratch; some ROS 2 package conventions follow the open source
-  #emph[husky/husky] repository (BSD-3-Clause). Clearpath Robotics is not
-  affiliated with this project.
+#fig("07-top.png", "The plan view as drawn")
+
+#fig("build/p4-closing.jpg", "And on the bench: the extrusion frame, the battery pack down the centre with its wiring, and the twin fans at the front")
+
+#place(bottom, scope: "parent", float: true, clearance: 1.6em)[
+  #set align(center)
+  #line(length: 100%, stroke: 0.6pt + luma(120))
+  #v(0.5em)
+  #text(size: 9pt)[
+    *Contact* #h(0.6em) #AUTHOR #sym.dot.c #EMAIL #sym.dot.c #GITHUB
+  ]
+  #v(0.55em)
+  #block(width: 78%)[
+    #set par(justify: false)
+    #text(size: 7.5pt, fill: luma(105))[
+      Inspired by the Clearpath Husky platform. Mechanical design modelled from
+      scratch; some ROS 2 package conventions follow the open source
+      #emph[husky/husky] repository (BSD-3-Clause). Clearpath Robotics is not
+      affiliated with this project.
+    ]
+  ]
 ]

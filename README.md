@@ -9,7 +9,7 @@
 [![ROS 2](https://img.shields.io/badge/ROS%202-Jazzy-brightgreen.svg)](https://docs.ros.org/en/jazzy/)
 [![Status](https://img.shields.io/badge/status-in%20construction-yellow.svg)](#status)
 
-<img src="docs/images/01-hero-front-right.png" width="820" alt="Retriever, four wheel drive outdoor mobile robot">
+<img src="docs/images/01-hero-front-right.png" width="760" alt="Retriever">
 
 </div>
 
@@ -49,6 +49,19 @@ measurable exit criterion at every stage.
 Beyond stage 5, the intention is to mount a [Niryo
 One](https://github.com/NiryoRobotics/niryo_one) arm on Retriever and turn the
 platform into a mobile manipulator.
+
+<div align="center">
+<img src="docs/images/11-bare-frame.png" width="32%" alt="Aluminium extrusion frame">
+<img src="docs/images/09-no-top-plate.png" width="32%" alt="Both decks visible">
+<img src="docs/images/15-electronics-bay.png" width="32%" alt="Electronics bay">
+</div>
+
+### The same thing, built
+
+<div align="center">
+<img src="docs/images/build/p1-rolling-chassis.jpg" width="49%" alt="Frame with battery and cooling fitted">
+<img src="docs/images/build/p2-interior-cooling.jpg" width="49%" alt="Twin fans over the electronics bay">
+</div>
 
 ## Three design decisions
 
@@ -90,29 +103,12 @@ N6  Manual battery isolator and main fuse
 | Target speed | 1.5 m/s |
 | Drivetrain | 4 x 6.5 inch hub motors, 250 W each |
 | Motor drivers | 4 x BLDC controllers, 36 to 48 V |
-| Battery | 37 V, 474 Wh lithium ion, 10S4P (`10INR19/66-4`), 30 to 42 V |
-| Endurance | ~115 min at 200 W average, 80 % of the pack usable |
+| Battery | 36 V, 280 Wh lithium ion, 10S3P |
+| Endurance | 70 min at 200 W average |
 | Compute | x86 SBC, Ubuntu 24.04, ROS 2 Jazzy |
 | Real time | 3 x ESP32 on CAN 2.0A, 500 kbit/s |
 | Localisation | GNSS, IMU and wheel odometry, dual EKF |
 | Navigation | Nav2, collision monitor, twist mux |
-
-## Design
-
-Every image below is a render of the current CAD assembly, not a mock-up. The
-chassis is modelled in full before anything is cut.
-
-| | |
-|:--:|:--:|
-| <img src="docs/images/09-no-top-plate.png" width="420"> | <img src="docs/images/11-bare-frame.png" width="420"> |
-| Top plate removed, both decks visible | The bare aluminium extrusion frame |
-| <img src="docs/images/12-wheel-mount.png" width="420"> | <img src="docs/images/16-lower-deck-37v.png" width="420"> |
-| Hub motor axle mount | Lower deck, the 37 V compartment |
-
-Orthographic views for dimensioning: [front](docs/images/05-front.png) ·
-[side](docs/images/06-side-right.png) · [top](docs/images/07-top.png) ·
-[rear](docs/images/08-rear.png). The full set is in
-[`docs/images`](docs/images/).
 
 ## Repository layout
 
@@ -167,12 +163,13 @@ platform and autonomous outdoor operation:
 
 - **Printed circuit boards.** Three boards are being designed in EasyEDA: a
   motor driver interface, a safety and power management board, and a CAN
-  distribution board. They need fabricating as 2 layer and 4 layer prototypes.
-- **Embedded AI compute.** The current x86 board runs the navigation stack but
-  cannot support real time inference for outdoor perception.
-- **Outdoor 3D LiDAR.** The blocking item. The 2D LiDAR on hand is specified
-  for indoor use only, with a 0 to 2000 lux test envelope and no IP rating,
-  while direct sunlight reaches 100 000 lux.
+  distribution board.
+- **Embedded AI compute.** The current x86 board runs the navigation stack, but
+  not the perception outdoor autonomy asks for.
+- **An outdoor LiDAR.** The blocking item. The 2D LiDAR on hand is specified for
+  indoor use, and direct sunlight saturates its receiver.
+- **A depth camera.** The Kinect v2 on hand is blind in daylight and its driver
+  has been unmaintained since 2021.
 
 Sponsors get a written and filmed integration tutorial for the sponsored part,
 a field test video with honest performance data, attribution on the chassis and
@@ -201,4 +198,5 @@ Licence Version 2, Strongly Reciprocal](LICENSE-HARDWARE.txt).
 
 ## Contact
 
-William Hanczyk, France
+William Hanczyk, Bordeaux, France
+wcontact33@gmail.com

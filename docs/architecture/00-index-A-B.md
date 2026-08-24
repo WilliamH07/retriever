@@ -152,7 +152,7 @@ Autrement dit : la demande crête de la motorisation dépasse d'un facteur 2 à 
    │ Kinect  │    │ YDLIDAR X4 (USB)  │    B U S   C A N   500 kbit/s
    │ v2 †    │    │ GPS USB           │   ═══╤═════════╤═════════╤═════════
    └─────────┘    └───────────────────┘      │         │         │
-   † alim secteur 12 V/2,67 A séparée    ┌───▼───┐ ┌───▼───┐ ┌───▼────────┐
+                                         ┌───▼───┐ ┌───▼───┐ ┌───▼────────┐
                                          │ESP32  │ │ESP32  │ │  ESP32     │
                                          │MOTION │ │MOTION │ │  SAFETY    │
                                          │ AVANT │ │ARRIÈRE│ │  + POWER   │
