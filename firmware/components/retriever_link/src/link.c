@@ -30,6 +30,7 @@ static const char *TAG = "link";
 #define TX_TASK_PRIO   20
 #define RX_TASK_PRIO   23
 #define TX_STACK       3072
+#define RT_LINK_RX_POLL_MS 2
 #define RX_STACK       3072
 
 static rt_link_config_t s_cfg;
@@ -47,6 +48,7 @@ static int64_t s_time_offset_us;
 static bool s_time_offset_valid;
 
 static const rt_link_backend_ops_t *s_backend;
+static TaskHandle_t s_tx_task;
 
 /* Les compteurs sont incrémentés par la tâche TX, par la tâche RX et par
  * n'importe quel appelant. Le §G.4 règle 5 en fait une sortie de premier plan :
@@ -115,6 +117,9 @@ esp_err_t rt_link_send(const rt_frame_t *f, TickType_t wait)
         STATS_INC(tx_dropped);
         return ESP_ERR_TIMEOUT;
     }
+    if (s_tx_task) {
+        xTaskNotifyGive(s_tx_task);
+    }
     return ESP_OK;
 }
 
@@ -130,7 +135,30 @@ esp_err_t rt_link_send_urgent(const rt_frame_t *f)
         STATS_INC(tx_dropped);
         return ESP_ERR_NO_MEM;
     }
+    if (s_tx_task) {
+        xTaskNotifyGive(s_tx_task);
+    }
     return ESP_OK;
+}
+
+static void send_one(const rt_frame_t *f)
+{
+    if (s_backend->send(f) == ESP_OK) {
+        STATS_INC(tx_frames);
+    } else {
+        STATS_INC(tx_dropped);
+    }
+}
+
+static bool drain_urgent(void)
+{
+    rt_frame_t f;
+    bool any = false;
+    while (xQueueReceive(s_tx_urgent_q, &f, 0) == pdTRUE) {
+        send_one(&f);
+        any = true;
+    }
+    return any;
 }
 
 static void tx_task(void *arg)
@@ -138,24 +166,24 @@ static void tx_task(void *arg)
     (void)arg;
     rt_frame_t f;
     for (;;) {
-        /* La file urgente passe toujours devant. C'est ce qui remplace, à
-         * l'intérieur d'un nœud, l'arbitrage que le bus CAN fera plus tard
-         * entre les nœuds. */
-        if (xQueueReceive(s_tx_urgent_q, &f, 0) == pdTRUE) {
-            if (s_backend->send(&f) == ESP_OK) {
-                STATS_INC(tx_frames);
-            } else {
-                STATS_INC(tx_dropped);
-            }
-            continue;
+        /* ⚠️ La tâche est RÉVEILLÉE par l'émetteur, elle ne scrute pas.
+         *
+         * La version précédente bloquait 20 ms sur la file normale : une trame
+         * urgente déposée juste après le début de cette attente y restait
+         * jusqu'à son expiration. La file prioritaire ne servait donc à rien,
+         * et les 20 ms se retrouvaient dans la mesure d'aller-retour — puis,
+         * par `latency_offset_ms`, dans l'horodatage de chaque échantillon. */
+        drain_urgent();
+
+        while (xQueueReceive(s_tx_q, &f, 0) == pdTRUE) {
+            send_one(&f);
+            /* Entre deux trames normales, l'urgente repasse devant. */
+            drain_urgent();
         }
-        if (xQueueReceive(s_tx_q, &f, pdMS_TO_TICKS(20)) == pdTRUE) {
-            if (s_backend->send(&f) == ESP_OK) {
-                STATS_INC(tx_frames);
-            } else {
-                STATS_INC(tx_dropped);
-            }
-        }
+
+        /* Le délai n'est qu'un filet : en régime normal, c'est la notification
+         * qui réveille. */
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(20));
     }
 }
 
@@ -196,7 +224,10 @@ static void rx_task(void *arg)
 {
     (void)arg;
     for (;;) {
-        s_backend->poll(pdMS_TO_TICKS(20));
+        /* 2 ms et non 20 : `uart_read_bytes` rend la main à l'expiration du
+         * délai, donc ce délai EST la latence de réception. À 1 kHz de tick,
+         * 500 réveils par seconde sur un ESP32 à 240 MHz ne se mesurent pas. */
+        s_backend->poll(pdMS_TO_TICKS(RT_LINK_RX_POLL_MS));
     }
 }
 
@@ -243,8 +274,9 @@ esp_err_t rt_link_init(const rt_link_config_t *cfg)
     if (xTaskCreate(rx_task, "link_rx", RX_STACK, NULL, RX_TASK_PRIO, &rx_handle) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
-    if (xTaskCreate(tx_task, "link_tx", TX_STACK, NULL, TX_TASK_PRIO, NULL) != pdPASS) {
+    if (xTaskCreate(tx_task, "link_tx", TX_STACK, NULL, TX_TASK_PRIO, &s_tx_task) != pdPASS) {
         vTaskDelete(rx_handle);
+        s_tx_task = NULL;
         return ESP_ERR_NO_MEM;
     }
     s_started = true;

@@ -50,6 +50,14 @@ class Monitor:
         self.recent: dict[int, deque[float]] = defaultdict(lambda: deque(maxlen=200))
         self.last_values: dict[int, dict] = {}
         self.log_line = ""
+        # ⚠️ Les journaux du firmware sont la donnée la plus utile du banc. La
+        # première version les imprimait, puis le tableau repeignait l'écran
+        # par-dessus toutes les 500 ms : ils étaient émis, reçus, décodés, et
+        # invisibles. On les garde et on les affiche SOUS le tableau.
+        self.log_lines: deque[str] = deque(maxlen=14)
+        # Compteurs d'erreur il y a ~10 s, pour distinguer le bruit de
+        # démarrage — le journal de boot à 115200 — d'une ligne qui va mal.
+        self.err_history: deque[tuple[float, int]] = deque(maxlen=400)
         self.round_trip_ms: deque[float] = deque(maxlen=100)
         self.ping_seq = 0
         self.started = time.monotonic()
@@ -113,7 +121,12 @@ class Monitor:
         self.log_line += chars.decode("utf-8", errors="replace")
         if eol or len(self.log_line) > 400:
             tag = {0: "ERREUR", 1: "ATTENTION", 2: "INFO", 3: "DEBUG"}.get(level, "INFO")
-            print(f"[esp32 {tag}] {self.log_line}")
+            stamp = time.strftime("%H:%M:%S")
+            line = f"{stamp}  {tag:<9} {self.log_line}"
+            if self.args.watch or self.args.raw:
+                print(line)
+            else:
+                self.log_lines.append(line)
             self.log_line = ""
 
     # -- affichage --------------------------------------------------------
@@ -125,9 +138,21 @@ class Monitor:
         span = stamps[-1] - stamps[0]
         return (len(stamps) - 1) / span if span > 1e-6 else 0.0
 
+    def recent_errors(self) -> tuple[int, float]:
+        """Erreurs sur les dix dernières secondes, et la fenêtre réellement couverte."""
+        s = self.decoder.stats
+        total = s.crc_errors + s.format_errors + s.overflows
+        now = time.monotonic()
+        self.err_history.append((now, total))
+        while len(self.err_history) > 1 and now - self.err_history[0][0] > 10.0:
+            self.err_history.popleft()
+        t0, e0 = self.err_history[0]
+        return total - e0, now - t0
+
     def render(self) -> None:
         s = self.decoder.stats
         uptime = time.monotonic() - self.started
+        recent_err, window = self.recent_errors()
 
         lines = [
             "\033[2J\033[H",
@@ -136,6 +161,8 @@ class Monitor:
             "",
             f"  trames valides {s.frames_ok:<10} CRC faux {s.crc_errors:<8} "
             f"format {s.format_errors:<8} débordements {s.overflows}",
+            f"  erreurs sur les {window:.0f} dernières secondes : {recent_err}"
+            + ("   ← c'est ce chiffre qui compte" if recent_err == 0 else "   ⚠ la ligne a un problème"),
         ]
 
         if self.round_trip_ms:
@@ -150,6 +177,16 @@ class Monitor:
 
         if self.node_hash is not None:
             lines.append(f"  hash du protocole annoncé par le nœud : 0x{self.node_hash:08X}")
+
+        imu = self.last_values.get(self.proto.by_name["IMU_STATUS"].id)
+        if imu:
+            qualite = {0: "nulle", 1: "basse", 2: "moyenne", 3: "haute"}
+            lines.append(
+                f"  IMU  orientation {qualite.get(int(imu['status_rot']), '?'):<8}"
+                f"gyro {qualite.get(int(imu['status_gyro']), '?'):<8}"
+                f"accel {qualite.get(int(imu['status_accel']), '?'):<8}"
+                f"resets {int(imu['reset_count'])}   perdus {int(imu['dropped'])}"
+            )
 
         lines += ["", f"  {'trame':<24}{'id':>6}{'reçues':>10}{'Hz':>9}{'attendu':>9}", ""]
 
@@ -175,6 +212,10 @@ class Monitor:
                 "    3. le nœud tourne-t-il ?    la LED d'alimentation de la DevKitC",
                 "    4. TX et RX croisés ?       sur une DevKitC par USB, rien à croiser",
             ]
+
+        if self.log_lines:
+            lines += ["", "  ── journaux du firmware " + "─" * 44, ""]
+            lines += [f"  {l}" for l in self.log_lines]
 
         sys.stdout.write("\n".join(lines) + "\n")
         sys.stdout.flush()
