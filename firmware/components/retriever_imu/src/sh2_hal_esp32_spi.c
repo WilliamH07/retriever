@@ -10,14 +10,25 @@
  *  serait recopier un travail déjà fait, déjà débogué et publié sous une
  *  licence compatible. Le seul code spécifique au projet est celui-ci.
  *
- *  Protocole SPI du BNO08x, tel qu'il se déroule réellement :
+ *  Protocole SPI du BNO08x, tel qu'il se déroule réellement — et ce point a
+ *  coûté une séance de banc, alors il est écrit en toutes lettres :
  *
- *    lecture   H_INTN passe bas ──► CS bas ──► 4 octets d'en-tête SHTP
+ *    lecture   H_INTN bas ──► TRANSACTION 1 : 4 octets d'en-tête, CS REMONTE
  *              longueur = (h0 | h1<<8) & 0x7FFF, en-tête compris
- *              ──► lire (longueur − 4) octets de plus ──► CS haut
+ *              ──► attendre que H_INTN se réabaisse
+ *              ──► TRANSACTION 2 : le paquet ENTIER, en-tête RELU, CS remonte
  *
  *    écriture  WAKE (PS0) bas ──► attendre H_INTN ──► CS bas ──► écrire
  *              ──► CS haut ──► WAKE haut
+ *
+ *  ⚠️ Les deux transactions de lecture sont SÉPARÉES, et le paquet est relu
+ *  depuis son début. Garder CS bas entre l'en-tête et le corps — ce qui paraît
+ *  plus efficace, et que faisait la première version — ne donne PAS une lecture
+ *  en deux temps : le composant y voit une lecture suivie d'une ÉCRITURE, il
+ *  refuse le paquet malformé, empile une erreur SHTP sur le canal 0, et ne
+ *  consomme jamais le paquet en attente. Symptôme observé : des milliers de
+ *  lectures par seconde du même paquet, une liste d'erreurs qui s'allonge, et
+ *  zéro événement capteur.
  *
  *  ⚠️ ÉTAT : écrit d'après la datasheet, le manuel de référence SH-2 et le
  *  portage de référence sh2-demo-nucleo. NON VALIDÉ SUR MATÉRIEL. La recette
@@ -101,7 +112,7 @@ bool rt_sh2_hal_wait_intn(uint32_t ms) { return wait_intn(ms); }
  *  Transferts
  * ----------------------------------------------------------------------- */
 
-static esp_err_t spi_rx(uint8_t *dst, size_t len, bool keep_cs)
+static esp_err_t spi_rx(uint8_t *dst, size_t len)
 {
     if (len == 0u) {
         return ESP_OK;
@@ -111,29 +122,9 @@ static esp_err_t spi_rx(uint8_t *dst, size_t len, bool keep_cs)
     t.length = len * 8u;
     t.rxlength = len * 8u;
     t.rx_buffer = dst;
-    t.flags = keep_cs ? SPI_TRANS_CS_KEEP_ACTIVE : 0;
+    /* Pas de SPI_TRANS_CS_KEEP_ACTIVE : chaque lecture est une transaction
+     * complète, CS compris. Voir le bandeau en tête de fichier. */
     return spi_device_polling_transmit(s_hal.spi, &t);
-}
-
-/**
- * Relâche CS par une transaction réelle.
- *
- * ⚠️ Point non évident, et qui coûte cher si on le manque :
- * `spi_device_release_bus()` ne désasserte PAS CS — il ne relâche que le verrou
- * de bus. Et `spi_rx()` avec `len == 0` ne produit AUCUNE transaction, donc ne
- * le désasserte pas non plus. Sans cet appel, tout en-tête SHTP sans corps —
- * le cas normal quand le composant asserte H_INTN sans charge utile — laisse
- * CS bas indéfiniment. Le transfert suivant démarre alors sans front descendant
- * sur CS, le BNO085 ne le cadre pas comme un nouveau transfert, et la liaison
- * se désynchronise SANS QU'AUCUNE FONCTION NE RETOURNE D'ERREUR.
- *
- * L'octet lu ici est du remplissage : le composant n'a plus rien à dire, le
- * paquet étant délimité par la longueur de son en-tête.
- */
-static void spi_cs_release(void)
-{
-    uint8_t dummy = 0;
-    (void)spi_rx(&dummy, 1, false);
 }
 
 static esp_err_t spi_tx(const uint8_t *src, size_t len)
@@ -221,55 +212,45 @@ static int hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t
         *t_us = (uint32_t)esp_timer_get_time();
     }
 
-    if (spi_device_acquire_bus(s_hal.spi, portMAX_DELAY) != ESP_OK) {
+    /* --- Transaction 1 : l'en-tête seul, CS remonte à la fin -------------- */
+    uint8_t header[4] = {0};
+    if (spi_rx(header, sizeof(header)) != ESP_OK) {
         return 0;
     }
 
-    int result = 0;
-
-    if (spi_rx(s_staging, 4, true) != ESP_OK) {
-        spi_cs_release();
-        spi_device_release_bus(s_hal.spi);
-        return 0;
-    }
-
-    const unsigned total = (unsigned)((s_staging[0] | ((unsigned)s_staging[1] << 8)) & 0x7FFFu);
-
-    if (total <= 4u) {
-        /* En-tête vide, ou réduit à lui-même : rien à lire de plus. */
-        spi_cs_release();
+    const unsigned total = (unsigned)((header[0] | ((unsigned)header[1] << 8)) & 0x7FFFu);
+    if (total < 4u) {
         s_counters.empty_headers++;
-        if (total == 4u) {
-            memcpy(pBuffer, s_staging, 4);
-            result = 4;
-        }
-    } else if (total <= len && total <= sizeof(s_staging)) {
-        if (spi_rx(s_staging + 4, total - 4u, false) == ESP_OK) {
-            memcpy(pBuffer, s_staging, total);
-            result = (int)total;
-            s_counters.packets++;
-            dump_packet(total, len);
-        } else {
-            spi_cs_release();
-        }
-    } else {
-        /* Paquet plus grand que ce qu'on peut rendre. On le vide proprement :
-         * le laisser en attente bloquerait H_INTN et donc tout le flux. */
-        ESP_LOGW(TAG, "paquet de %u octets pour un tampon de %u", total, len);
-        unsigned left = total - 4u;
-        bool ok = true;
-        while (left > 0u && ok) {
-            const unsigned n = left > sizeof(s_staging) ? (unsigned)sizeof(s_staging) : left;
-            ok = (spi_rx(s_staging, n, left > n) == ESP_OK);
-            left -= n;
-        }
-        if (!ok) {
-            spi_cs_release();
-        }
+        return 0;   /* en-tête vide : le composant n'avait rien à dire */
     }
 
-    spi_device_release_bus(s_hal.spi);
-    return result;
+    /* --- Le composant réasserte H_INTN pour annoncer qu'il va represente le
+     *     paquet depuis son début. Sans cette attente, la seconde transaction
+     *     part trop tôt et lit du remplissage. ------------------------------ */
+    if (!wait_intn(INTN_WAIT_MS)) {
+        s_counters.repeat_timeouts++;
+        return 0;
+    }
+
+    /* --- Transaction 2 : le paquet ENTIER, en-tête relu ------------------- */
+    const unsigned want = (total > sizeof(s_staging)) ? (unsigned)sizeof(s_staging) : total;
+    if (spi_rx(s_staging, want) != ESP_OK) {
+        return 0;
+    }
+
+    if (total > len) {
+        /* Plus grand que ce que la pile peut recevoir. Le paquet a tout de même
+         * été lu, donc consommé : ne pas le laisser en attente bloquerait
+         * H_INTN et donc tout le flux. */
+        s_counters.oversize++;
+        ESP_LOGW(TAG, "paquet de %u octets pour un tampon de %u", total, len);
+        return 0;
+    }
+
+    memcpy(pBuffer, s_staging, total);
+    s_counters.packets++;
+    dump_packet(total, len);
+    return (int)total;
 }
 
 static int hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
