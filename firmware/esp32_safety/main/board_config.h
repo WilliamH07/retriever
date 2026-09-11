@@ -58,26 +58,49 @@
 #define BOARD_IMU_PS0        26          /* PS0/WAKE — piloté, jamais câblé en dur */
 #define BOARD_IMU_CLOCK_HZ   3000000     /* 3 MHz maximum ✅ */
 
-/*  Câblage du banc — à reporter tel quel :
+/*  Câblage du banc.
  *
- *    BNO085            DevKitC        note
- *    ------            -------        ----
- *    VIN / 3V3         3V3            VDD monte avant ou avec VDDIO
- *    GND               GND            masse commune, un seul point
- *    SCK / SCL         GPIO18
- *    SDA / MOSI        GPIO23         « DI » sur certaines cartes
- *    DO  / MISO        GPIO19         « SDO » / « ADR » selon les cartes
- *    CS                GPIO22
- *    INT               GPIO25         actif bas
- *    RST               GPIO33         actif bas
- *    PS0               GPIO26         ⚠️ décoller le pontet I²C de la carte
- *    PS1               3V3            ⚠️ idem — les deux hauts AVANT le reset
- *    BOOTN             3V3 via 10 kΩ  bas au reset = bootloader
+ *  ⚠️ LE PIÈGE DE CE CAPTEUR, et il fait perdre une journée à qui l'ignore :
+ *  en SPI, ce n'est PAS `SDA` qui porte les données vers le capteur. La
+ *  datasheet BNO08x multiplexe les broches d'interface ainsi ✅ :
  *
- *  ⚠️ Sur les cartes Adafruit et SparkFun, PS0 et PS1 sont strappés pour l'I²C.
- *  Tant que ce pontet n'est pas modifié, le composant démarre en I²C et le SPI
- *  ne répondra jamais — sans message d'erreur, parce qu'il n'y a personne pour
- *  en émettre un. C'est la première chose à vérifier si sh2_getProdIds() échoue.
+ *      broche 19   H_SCL (I²C)  →  SCK
+ *      broche 20   H_SDA (I²C)  →  H_MISO    capteur → ESP32
+ *      broche 17   SA0   (I²C)  →  H_MOSI    ESP32 → capteur
+ *      broche 18   —            →  H_CSN
+ *      broche 14   H_INTN       →  H_INTN
+ *
+ *  Autrement dit, la broche de SÉLECTION D'ADRESSE I²C devient MOSI. Selon les
+ *  cartes elle est sérigraphiée `ADDR`, `ADR`, `SA0`, `DI` ou `SI`.
+ *
+ *      Fonction         DevKitC     Sérigraphies rencontrées
+ *      --------         -------     ------------------------
+ *      alimentation     3V3         `3V3` · `VIN`
+ *      masse            GND         `GND`
+ *      horloge          GPIO18      `SCL` · `SCK`
+ *      capteur → ESP32  GPIO19      `SDA` · `SO` · `MISO`
+ *      ESP32 → capteur  GPIO23      `ADDR` · `ADR` · `SA0` · `DI` · `SI`
+ *      sélection        GPIO22      `CS`
+ *      interruption     GPIO25      `INT`   actif bas
+ *      reset            GPIO33      `RST`   actif bas
+ *      PS0 / WAKE       GPIO26      `PS0` · `P0` · `WAK`
+ *      PS1              3V3         `PS1` · `P1`
+ *      BOOTN            3V3 / 10 kΩ `BOOT` · `BT` — absent du connecteur =
+ *                                   déjà tiré haut sur la carte
+ *
+ *  ⚠️ PS1 ET PS0 doivent être HAUTS AVANT LE RESET, sinon le composant démarre
+ *  en I²C et le SPI ne répondra jamais — sans message d'erreur, parce qu'il n'y
+ *  a personne pour en émettre un (§C15). Sur les cartes où PS0 et PS1 sont des
+ *  cavaliers à souder (SparkFun), il faut les fermer. Sur celles où ce sont des
+ *  broches, PS1 va au 3V3 et PS0 au GPIO, qui l'emporte sur le tirage bas.
+ *
+ *  ⚠️ PS0 est repris comme WAKE après le reset ✅. Il doit donc aller à un GPIO,
+ *  et jamais être câblé en dur au 3V3.
+ *
+ *  `RST` doit être câblé, pas laissé en l'air : le firmware fait sa propre
+ *  séquence de reset après avoir positionné PS0, et c'est elle qui garantit que
+ *  le capteur voit les bons niveaux au bon moment, quel que soit l'ordre de
+ *  mise sous tension.
  */
 
 /* --- IMU, réglages ------------------------------------------------------- */
