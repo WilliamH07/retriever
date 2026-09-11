@@ -48,6 +48,14 @@ static const char *TAG = "sh2.spi";
 #define RESET_SETTLE_MS 300
 #define INTN_WAIT_MS    100
 
+/* ⚠️ Les tampons que nous passe la pile SH-2 ne sont ni alignés ni de longueur
+ * multiple de 4. Le pilote SPI d'ESP-IDF exige les deux pour le DMA : à défaut,
+ * il alloue un tampon de rebond au tas — à 100 Hz, et dans le chemin même dont
+ * tout ce fichier cherche à protéger l'horodatage. On lit donc dans un tampon
+ * statique aligné, et on recopie. C'est aussi ce qu'exige la règle §G.4-1 :
+ * aucune allocation après l'initialisation. */
+static WORD_ALIGNED_ATTR uint8_t s_staging[SH2_HAL_MAX_TRANSFER_IN];
+
 typedef struct {
     sh2_Hal_t hal;              /* DOIT rester en premier : sh2 nous rend ce pointeur */
     spi_device_handle_t spi;
@@ -101,6 +109,27 @@ static esp_err_t spi_rx(uint8_t *dst, size_t len, bool keep_cs)
     t.rx_buffer = dst;
     t.flags = keep_cs ? SPI_TRANS_CS_KEEP_ACTIVE : 0;
     return spi_device_polling_transmit(s_hal.spi, &t);
+}
+
+/**
+ * Relâche CS par une transaction réelle.
+ *
+ * ⚠️ Point non évident, et qui coûte cher si on le manque :
+ * `spi_device_release_bus()` ne désasserte PAS CS — il ne relâche que le verrou
+ * de bus. Et `spi_rx()` avec `len == 0` ne produit AUCUNE transaction, donc ne
+ * le désasserte pas non plus. Sans cet appel, tout en-tête SHTP sans corps —
+ * le cas normal quand le composant asserte H_INTN sans charge utile — laisse
+ * CS bas indéfiniment. Le transfert suivant démarre alors sans front descendant
+ * sur CS, le BNO085 ne le cadre pas comme un nouveau transfert, et la liaison
+ * se désynchronise SANS QU'AUCUNE FONCTION NE RETOURNE D'ERREUR.
+ *
+ * L'octet lu ici est du remplissage : le composant n'a plus rien à dire, le
+ * paquet étant délimité par la longueur de son en-tête.
+ */
+static void spi_cs_release(void)
+{
+    uint8_t dummy = 0;
+    (void)spi_rx(&dummy, 1, false);
 }
 
 static esp_err_t spi_tx(const uint8_t *src, size_t len)
@@ -171,32 +200,43 @@ static int hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t
         return 0;
     }
 
-    uint8_t header[4] = {0};
     int result = 0;
 
-    if (spi_rx(header, sizeof(header), true) == ESP_OK) {
-        const unsigned total = (unsigned)((header[0] | ((unsigned)header[1] << 8)) & 0x7FFFu);
-        if (total >= 4u && total <= len) {
-            memcpy(pBuffer, header, 4);
-            if (spi_rx(pBuffer + 4, total - 4u, false) == ESP_OK) {
-                result = (int)total;
-            }
-        } else if (total > len) {
-            /* Paquet plus grand que le tampon fourni par sh2. On le jette
-             * proprement : le laisser en attente bloquerait la ligne H_INTN. */
-            ESP_LOGW(TAG, "paquet de %u octets pour un tampon de %u", total, len);
-            uint8_t sink[64];
-            unsigned left = total - 4u;
-            while (left > 0u) {
-                const unsigned n = left > sizeof(sink) ? (unsigned)sizeof(sink) : left;
-                if (spi_rx(sink, n, left > n) != ESP_OK) {
-                    break;
-                }
-                left -= n;
-            }
+    if (spi_rx(s_staging, 4, true) != ESP_OK) {
+        spi_cs_release();
+        spi_device_release_bus(s_hal.spi);
+        return 0;
+    }
+
+    const unsigned total = (unsigned)((s_staging[0] | ((unsigned)s_staging[1] << 8)) & 0x7FFFu);
+
+    if (total <= 4u) {
+        /* En-tête vide, ou réduit à lui-même : rien à lire de plus. */
+        spi_cs_release();
+        if (total == 4u) {
+            memcpy(pBuffer, s_staging, 4);
+            result = 4;
+        }
+    } else if (total <= len && total <= sizeof(s_staging)) {
+        if (spi_rx(s_staging + 4, total - 4u, false) == ESP_OK) {
+            memcpy(pBuffer, s_staging, total);
+            result = (int)total;
         } else {
-            /* total < 4 : en-tête vide, le composant n'avait rien à dire. */
-            (void)spi_rx(header, 0, false);
+            spi_cs_release();
+        }
+    } else {
+        /* Paquet plus grand que ce qu'on peut rendre. On le vide proprement :
+         * le laisser en attente bloquerait H_INTN et donc tout le flux. */
+        ESP_LOGW(TAG, "paquet de %u octets pour un tampon de %u", total, len);
+        unsigned left = total - 4u;
+        bool ok = true;
+        while (left > 0u && ok) {
+            const unsigned n = left > sizeof(s_staging) ? (unsigned)sizeof(s_staging) : left;
+            ok = (spi_rx(s_staging, n, left > n) == ESP_OK);
+            left -= n;
+        }
+        if (!ok) {
+            spi_cs_release();
         }
     }
 
@@ -305,7 +345,11 @@ sh2_Hal_t *rt_sh2_hal_init(const rt_sh2_hal_pins_t *pins, int spi_host, int cloc
         .clock_speed_hz = clock_hz,
         .spics_io_num = pins->cs,
         .queue_size = 4,
-        .cs_ena_pretrans = 2,
+        /* Pas de `cs_ena_pretrans` : la documentation ESP-IDF précise qu'il
+         * n'agit que sur les transactions half-duplex. Ici on est en
+         * full-duplex, il serait ignoré en silence — et un paramètre qui
+         * semble donner un temps d'établissement de CS sans le donner est pire
+         * que pas de paramètre du tout. `cs_ena_posttrans`, lui, s'applique. */
         .cs_ena_posttrans = 2,
     };
     if (spi_bus_add_device((spi_host_device_t)spi_host, &dev, &s_hal.spi) != ESP_OK) {

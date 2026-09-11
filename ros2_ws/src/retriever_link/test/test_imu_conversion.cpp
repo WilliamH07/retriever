@@ -193,6 +193,22 @@ TEST(Covariance, SansEstimationLeLacetEstDeclareInconnu)
   EXPECT_LT(r.msg.orientation_covariance[0], 0.01);
 }
 
+TEST(Covariance, LaSentinelleVautNonRenseigne)
+{
+  ImuSample s = make_sample();
+  // 6,5535 rad est la borne haute exacte de l'encodage u16 × 1e-4. Le firmware
+  // l'émet pour dire « je n'ai pas d'estimation ». Prise au pied de la lettre,
+  // elle donnerait une variance de 43 — proche du bon résultat par accident.
+  // On veut le bon résultat par construction.
+  s.quat_accuracy_rad = 6.5535F;
+
+  ImuNoiseModel noise;
+  noise.orientation_stddev_yaw_unreported = 1.0;
+
+  const auto r = to_imu_message(s, noise, "imu_link", stamp_of(1, 0));
+  EXPECT_NEAR(r.msg.orientation_covariance[8], 1.0, 1e-9);
+}
+
 TEST(Covariance, LesMatricesSontDiagonales)
 {
   const ImuSample s = make_sample();

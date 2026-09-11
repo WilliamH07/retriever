@@ -101,8 +101,11 @@ void SerialTransport::open()
 
   rt_frame_decoder_init(&decoder_);
   pending_.clear();
-  stats_ = Stats{};
-  stats_.connected = true;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    stats_ = Stats{};
+    stats_.connected = true;
+  }
 }
 
 void SerialTransport::close()
@@ -111,6 +114,7 @@ void SerialTransport::close()
     ::close(fd_);
     fd_ = -1;
   }
+  std::lock_guard<std::mutex> lock(mutex_);
   stats_.connected = false;
 }
 
@@ -169,16 +173,26 @@ bool SerialTransport::send(const protocol::Frame & frame)
   if (n == 0) {
     return false;
   }
+  // ⚠️ Le descripteur est non bloquant. Une boucle qui se contente de réessayer
+  // sur EAGAIN tourne à 100 % de CPU, sans délai maximal — et comme send() est
+  // appelée depuis le fil de l'exécuteur, elle gèlerait tout le nœud. On attend
+  // que la sortie se libère, avec un plafond, puis on abandonne la trame.
   std::size_t written = 0;
   while (written < n) {
     const ssize_t w = ::write(fd_, wire.data() + written, n - written);
-    if (w <= 0) {
-      if (errno == EAGAIN || errno == EINTR) {
-        continue;
-      }
-      return false;
+    if (w > 0) {
+      written += static_cast<std::size_t>(w);
+      continue;
     }
-    written += static_cast<std::size_t>(w);
+    if (w < 0 && (errno == EAGAIN || errno == EINTR)) {
+      pollfd pfd{fd_, POLLOUT, 0};
+      if (::poll(&pfd, 1, 20) <= 0) {
+        return false;
+      }
+      continue;
+    }
+    // w == 0 : errno n'a pas été positionné par cet appel, on n'y lit rien.
+    return false;
   }
   {
     std::lock_guard<std::mutex> lock(mutex_);

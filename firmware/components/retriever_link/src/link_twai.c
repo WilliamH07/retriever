@@ -25,18 +25,33 @@
 
 static const char *TAG = "link.twai";
 
+static bool s_bus_off;
+
 static esp_err_t twai_init_(const rt_link_config_t *cfg)
 {
     twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(
         (gpio_num_t)cfg->twai_tx_gpio, (gpio_num_t)cfg->twai_rx_gpio, TWAI_MODE_NORMAL);
     g.rx_queue_len = 32;
     g.tx_queue_len = 32;
-    /* Reprise automatique après bus-off, équivalent du `restart-ms` de
-     * SocketCAN côté Linux (§F.5-L1). Sans cela, un nœud parti en bus-off y
-     * reste jusqu'au redémarrage. */
-    g.alerts_enabled = TWAI_ALERT_BUS_OFF | TWAI_ALERT_ERR_PASS | TWAI_ALERT_BUS_ERROR;
+    g.alerts_enabled = TWAI_ALERT_BUS_OFF | TWAI_ALERT_BUS_RECOVERED |
+                       TWAI_ALERT_ERR_PASS | TWAI_ALERT_BUS_ERROR;
 
-    const twai_timing_config_t t = TWAI_TIMING_CONFIG_500KBITS();
+    /* Le débit n'est pas libre : le contrôleur TWAI demande une configuration
+     * de temporisation figée à la compilation. Annoncer un débit dans les
+     * journaux tout en câblant 500 kbit/s serait le genre d'écart qu'on
+     * cherche une nuit entière. */
+    twai_timing_config_t t;
+    switch (cfg->twai_bitrate) {
+    case 1000000: t = (twai_timing_config_t)TWAI_TIMING_CONFIG_1MBITS();   break;
+    case 800000:  t = (twai_timing_config_t)TWAI_TIMING_CONFIG_800KBITS(); break;
+    case 500000:  t = (twai_timing_config_t)TWAI_TIMING_CONFIG_500KBITS(); break;
+    case 250000:  t = (twai_timing_config_t)TWAI_TIMING_CONFIG_250KBITS(); break;
+    case 125000:  t = (twai_timing_config_t)TWAI_TIMING_CONFIG_125KBITS(); break;
+    default:
+        ESP_LOGE(TAG, "debit can non gere : %d bit/s", cfg->twai_bitrate);
+        return ESP_ERR_INVALID_ARG;
+    }
+
     const twai_filter_config_t f = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 
     esp_err_t err = twai_driver_install(&g, &t, &f);
@@ -57,15 +72,50 @@ static esp_err_t twai_send(const rt_frame_t *f)
     twai_message_t msg;
     memset(&msg, 0, sizeof(msg));
     msg.identifier = f->id;      /* 11 bits */
-    msg.data_length_code = f->dlc;
-    memcpy(msg.data, f->data, f->dlc);
+    /* Écrêtage symétrique de celui de la réception : `msg.data` fait huit
+     * octets, et une asymétrie entre les deux sens est une invitation. */
+    msg.data_length_code = f->dlc > RT_MAX_PAYLOAD ? RT_MAX_PAYLOAD : f->dlc;
+    memcpy(msg.data, f->data, msg.data_length_code);
     return twai_transmit(&msg, pdMS_TO_TICKS(10));
+}
+
+/**
+ * Reprise après bus-off.
+ *
+ * ⚠️ `twai_initiate_recovery()` NE remet PAS le contrôleur en marche : après
+ * 128 occurrences du signal bus-libre, il passe en état ARRÊTÉ, et il faut
+ * rappeler `twai_start()`. L'oublier donne un nœud qui se tait définitivement
+ * après le premier bus-off — et dont le diagnostic annonce que tout va bien,
+ * puisque l'état n'est plus « bus-off ».
+ *
+ * C'est ici, dans la boucle de réception, et pas dans la lecture des
+ * compteurs : une fonction de statistiques ne doit pas avoir d'effet de bord.
+ */
+static void twai_recover(void)
+{
+    twai_status_info_t st;
+    if (twai_get_status_info(&st) != ESP_OK) {
+        return;
+    }
+    if (st.state == TWAI_STATE_BUS_OFF) {
+        if (!s_bus_off) {
+            s_bus_off = true;
+            ESP_LOGE(TAG, "bus-off : tentative de reprise");
+        }
+        (void)twai_initiate_recovery();
+    } else if (st.state == TWAI_STATE_STOPPED && s_bus_off) {
+        if (twai_start() == ESP_OK) {
+            s_bus_off = false;
+            ESP_LOGW(TAG, "bus repris");
+        }
+    }
 }
 
 static void twai_poll(TickType_t wait)
 {
     twai_message_t msg;
     if (twai_receive(&msg, wait) != ESP_OK) {
+        twai_recover();
         return;
     }
     if (msg.extd || msg.rtr) {
@@ -85,12 +135,11 @@ static void twai_stats_(rt_link_stats_t *out)
     if (twai_get_status_info(&st) != ESP_OK) {
         return;
     }
-    out->bus_off = (st.state == TWAI_STATE_BUS_OFF);
+    /* Lecture pure, aucun effet de bord : la reprise est dans twai_recover().
+     * `bus_off` reste vrai pendant toute la reprise, pour que le diagnostic ne
+     * déclare pas la liaison saine avant qu'elle ne le soit. */
+    out->bus_off = s_bus_off || (st.state == TWAI_STATE_BUS_OFF);
     out->bus_errors = st.bus_error_count;
-    if (out->bus_off) {
-        /* Redémarrage automatique : l'équivalent embarqué de restart-ms. */
-        (void)twai_initiate_recovery();
-    }
 }
 
 static const rt_link_backend_ops_t s_ops = {

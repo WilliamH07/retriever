@@ -4,9 +4,18 @@ project(retriever_protocol)
 find_package(ament_cmake REQUIRED)
 
 add_library(${PROJECT_NAME} INTERFACE)
+# Deux chemins, et le second n'est pas un oubli de style.
+#
+# rt_framing.h — partagé avec le firmware — fait #include "retriever_protocol.h"
+# sans préfixe, parce que côté ESP-IDF le composant expose directement le
+# répertoire qui contient le fichier. Pour que le MÊME fichier compile ici, il
+# faut exposer aussi le répertoire qui le contient directement. Sans cette
+# seconde ligne, toute unité qui inclut transport.hpp échoue à la compilation.
 target_include_directories(${PROJECT_NAME} INTERFACE
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-  "$<INSTALL_INTERFACE:include>")
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/retriever_protocol>"
+  "$<INSTALL_INTERFACE:include>"
+  "$<INSTALL_INTERFACE:include/retriever_protocol>")
 target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_17)
 
 install(DIRECTORY include/ DESTINATION include)

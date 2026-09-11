@@ -45,7 +45,12 @@ add_library(retriever_framing STATIC
   "${PORTABLE_DIR}/rt_cobs.c"
   "${PORTABLE_DIR}/rt_crc16.c"
   "${PORTABLE_DIR}/rt_framing.c")
-target_include_directories(retriever_framing PUBLIC "${PORTABLE_DIR}")
+# Les en-têtes partagés sont installés à part : transport.hpp, qui est public,
+# fait #include "rt_framing.h". Sans installation, un paquet aval ne compile que
+# tant que l'arborescence source existe au même endroit.
+target_include_directories(retriever_framing PUBLIC
+  "$<BUILD_INTERFACE:${PORTABLE_DIR}>"
+  "$<INSTALL_INTERFACE:include/retriever_link_portable>")
 target_link_libraries(retriever_framing PUBLIC retriever_protocol::retriever_protocol)
 set_target_properties(retriever_framing PROPERTIES
   C_STANDARD 99 POSITION_INDEPENDENT_CODE ON)
@@ -60,8 +65,11 @@ add_library(${PROJECT_NAME} SHARED
 target_include_directories(${PROJECT_NAME} PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
   "$<INSTALL_INTERFACE:include>")
+# ⚠️ `PUBLIC` est obligatoire ici : sans mot-clé, ament_target_dependencies
+# appelle target_link_libraries en signature simple, et CMake refuse de mélanger
+# les deux formes sur une même cible — erreur fatale à la configuration.
 target_link_libraries(${PROJECT_NAME} PUBLIC retriever_framing)
-ament_target_dependencies(${PROJECT_NAME}
+ament_target_dependencies(${PROJECT_NAME} PUBLIC
   rclcpp sensor_msgs geometry_msgs retriever_protocol)
 
 # ---------------------------------------------------------------------------
@@ -80,6 +88,11 @@ install(TARGETS ${PROJECT_NAME} retriever_framing
   RUNTIME DESTINATION bin)
 install(TARGETS link_bridge DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY include/ DESTINATION include)
+install(FILES
+  "${PORTABLE_DIR}/rt_framing.h"
+  "${PORTABLE_DIR}/rt_cobs.h"
+  "${PORTABLE_DIR}/rt_crc16.h"
+  DESTINATION include/retriever_link_portable)
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_dependencies(rclcpp sensor_msgs geometry_msgs retriever_protocol)

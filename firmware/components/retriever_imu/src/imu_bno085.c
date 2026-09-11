@@ -21,6 +21,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
@@ -81,6 +82,19 @@ static void on_event(void *cookie, sh2_AsyncEvent_t *event)
     }
 }
 
+static uint64_t rt_imu_now_us(void)
+{
+    return (uint64_t)esp_timer_get_time();
+}
+
+/* Le magnétomètre arrive à 10 Hz, le triplet à 100 Hz : son drapeau de validité
+ * est conservé d'un échantillon à l'autre. Au-delà de ce délai, il ne l'est
+ * plus — un magnétomètre arrêté ne doit pas continuer à publier sa dernière
+ * valeur avec un compteur frais. */
+#define MAG_STALE_US 300000ull
+
+static uint64_t s_last_mag_us;
+
 static void publish_if_complete(void)
 {
     const uint8_t needed = RT_IMU_VALID_QUAT | RT_IMU_VALID_GYRO | RT_IMU_VALID_ACCEL;
@@ -91,9 +105,13 @@ static void publish_if_complete(void)
     if (xQueueSend(s_queue, &s_building, 0) != pdTRUE) {
         s_dropped++;
     }
-    /* On garde le magnétomètre et les états d'étalonnage d'un échantillon sur
-     * l'autre : ils arrivent moins souvent que le triplet. */
-    s_building.valid &= (uint8_t)RT_IMU_VALID_MAG;
+    /* On garde le magnétomètre d'un échantillon sur l'autre — il arrive moins
+     * souvent que le triplet — mais pas indéfiniment. */
+    if (rt_imu_now_us() - s_last_mag_us > MAG_STALE_US) {
+        s_building.valid = 0u;
+    } else {
+        s_building.valid &= (uint8_t)RT_IMU_VALID_MAG;
+    }
 }
 
 static void on_sensor(void *cookie, sh2_SensorEvent_t *event)
@@ -104,7 +122,12 @@ static void on_sensor(void *cookie, sh2_SensorEvent_t *event)
         return;
     }
 
-    s_building.t_us = (uint64_t)v.timestamp;
+    /* On ne recopie PAS v.timestamp : le protocole ne transporte aucun
+     * horodatage par échantillon (les huit octets sont pleins), et l'horloge
+     * que le HAL rend à SH-2 est un uint32_t qui reboucle toutes les 71 minutes.
+     * Un champ mort vaut mieux qu'un champ faux ; l'horodatage se fait côté
+     * calculateur, voir §AF.4. */
+    s_building.t_us = rt_imu_now_us();
 
     switch (v.sensorId) {
     case SH2_ROTATION_VECTOR:
@@ -124,11 +147,14 @@ static void on_sensor(void *cookie, sh2_SensorEvent_t *event)
         s_building.quat[2] = v.un.gameRotationVector.j;
         s_building.quat[3] = v.un.gameRotationVector.k;
         /* ⚠️ Le game rotation vector ne fournit AUCUNE estimation d'erreur : le
-         * champ n'existe pas. Publier 0 ferait croire à une orientation
-         * parfaite et ferait diverger l'EKF. On publie donc une valeur
-         * volontairement pessimiste, et le calculateur la reconnaît comme
-         * « non renseignée » par son ampleur. */
-        s_building.quat_accuracy_rad = 0.0f;
+         * champ n'existe tout simplement pas dans la structure (c'est un
+         * sh2_RotationVector_t, sans accuracy, là où le rotation vector est un
+         * sh2_RotationVectorWAcc_t). Publier 0 ferait croire à une orientation
+         * parfaite et ferait diverger l'EKF.
+         * On publie donc la BORNE HAUTE EXACTE de l'encodage — u16 d'échelle
+         * 1e-4, soit 6,5535 rad — que le calculateur reconnaît sans ambiguïté
+         * comme « non renseignée ». */
+        s_building.quat_accuracy_rad = RT_IMU_ACCURACY_UNREPORTED;
         s_building.status_rot = (uint8_t)(v.status & 0x03u);
         s_building.valid |= RT_IMU_VALID_QUAT;
         break;
@@ -158,6 +184,7 @@ static void on_sensor(void *cookie, sh2_SensorEvent_t *event)
         s_building.mag[2] = v.un.magneticField.z;
         s_building.status_mag = (uint8_t)(v.status & 0x03u);
         s_building.valid |= RT_IMU_VALID_MAG;
+        s_last_mag_us = rt_imu_now_us();
         break;
 
     default:

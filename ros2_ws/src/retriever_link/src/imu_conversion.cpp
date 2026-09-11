@@ -5,6 +5,7 @@
 
 #include "retriever_link/imu_conversion.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 
@@ -23,6 +24,11 @@ void fill_diagonal(std::array<double, 9> & cov, double vx, double vy, double vz)
 }
 
 constexpr double square(double v) { return v * v; }
+
+/// Sentinelle émise par le firmware quand le capteur ne fournit pas
+/// d'estimation d'erreur d'orientation. Doit rester égale à
+/// RT_IMU_ACCURACY_UNREPORTED, côté firmware.
+constexpr double kAccuracyUnreported = 6.5535;
 
 }  // namespace
 
@@ -59,12 +65,18 @@ ConversionResult to_imu_message(
     // Lacet : on prend l'estimation du capteur si elle existe, jamais en
     // dessous du plancher. Si elle n'existe pas — game rotation vector —, on
     // déclare le lacet inconnu plutôt que de laisser croire qu'il est bon.
+    // Deux façons pour le firmware de dire « je n'ai pas d'estimation » :
+    // zéro (aucun rapport reçu) ou la sentinelle 6,5535 rad, borne haute exacte
+    // de l'encodage, qu'émet le game rotation vector. Les deux mènent au même
+    // endroit : un lacet déclaré inconnu, pas un lacet déclaré parfait.
+    const double reported = static_cast<double>(sample.quat_accuracy_rad);
+    const bool unreported = (reported <= 0.0) || (reported >= kAccuracyUnreported);
+
     double yaw_stddev = noise.orientation_stddev_yaw_unreported;
-    if (noise.use_reported_accuracy && sample.quat_accuracy_rad > 0.0F) {
-      yaw_stddev = std::max(
-        static_cast<double>(sample.quat_accuracy_rad), noise.orientation_stddev_yaw_min);
-    } else if (!noise.use_reported_accuracy) {
+    if (!noise.use_reported_accuracy) {
       yaw_stddev = noise.orientation_stddev_yaw_min;
+    } else if (!unreported) {
+      yaw_stddev = std::max(reported, noise.orientation_stddev_yaw_min);
     }
 
     // ⚠️ 📐 Hypothèse assumée : la covariance est diagonale dans les axes du

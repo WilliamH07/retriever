@@ -34,7 +34,11 @@ static SemaphoreHandle_t s_mutex;
 static vprintf_like_t s_previous;
 static bool s_enabled;
 static uint32_t s_dropped;
-static volatile bool s_in_hook;   /* garde de récursion, voir règle 2 */
+
+/* Pas de garde de récursion séparée : le mutex FreeRTOS n'est pas récursif, et
+ * `xSemaphoreTake(..., 0)` échoue donc déjà pour une réentrée de la même tâche
+ * comme pour une autre tâche — en comptant la perte, ce qu'un drapeau booléen
+ * testé hors verrou ne faisait pas. La règle 2 est tenue par le mutex seul. */
 
 static uint8_t level_from_prefix(const char *s)
 {
@@ -75,7 +79,19 @@ void rt_link_log_emit(uint8_t level, const char *text, size_t len)
         rt_log_pack(&m, &f);
         if (rt_link_send(&f, 0) != ESP_OK) {
             s_dropped++;
-            return;   /* inutile d'insister : la ligne est déjà tronquée */
+            /* La ligne est perdue, mais il faut quand même FERMER la ligne :
+             * sans fragment portant le bit de fin, le réassembleur côté ROS
+             * collerait cette ligne tronquée à la suivante. Une tentative, non
+             * bloquante, et on abandonne. */
+            if (!last) {
+                rt_log_t end;
+                memset(&end, 0, sizeof(end));
+                end.header = (uint8_t)(((level & 0x07u) << 5) | 0x10u);
+                rt_frame_t ef;
+                rt_log_pack(&end, &ef);
+                (void)rt_link_send(&ef, 0);
+            }
+            return;
         }
         sent += n;
     }
@@ -83,9 +99,6 @@ void rt_link_log_emit(uint8_t level, const char *text, size_t len)
 
 static int log_hook(const char *fmt, va_list args)
 {
-    if (s_in_hook) {
-        return 0;
-    }
     if (!s_enabled || s_mutex == NULL) {
         return s_previous ? s_previous(fmt, args) : 0;
     }
@@ -94,7 +107,6 @@ static int log_hook(const char *fmt, va_list args)
         return 0;
     }
 
-    s_in_hook = true;
     static char line[LOG_LINE_MAX];
     int n = vsnprintf(line, sizeof(line), fmt, args);
     if (n > 0) {
@@ -114,15 +126,17 @@ static int log_hook(const char *fmt, va_list args)
                 len -= skip;
             }
         }
-        while (len > 0 && (start[len - 1] == '\033' || start[len - 1] == '[')) {
-            len--;
+        /* ⚠️ ESP-IDF termine la ligne colorée par « ESC [ 0 m » — donc par 'm',
+         * pas par ESC ni par '['. Une boucle qui ne teste que ces deux-là ne
+         * retire rien, et les quatre octets partent sur le fil : une trame LOG
+         * de plus sur deux, et de la ponctuation parasite dans /rosout. */
+        if (len >= 4u && memcmp(start + len - 4u, "\033[0m", 4u) == 0) {
+            len -= 4u;
         }
         if (len > 0) {
             rt_link_log_emit(level_from_prefix(line), start, len);
         }
     }
-    s_in_hook = false;
-
     xSemaphoreGive(s_mutex);
     return n;
 }

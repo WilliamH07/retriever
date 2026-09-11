@@ -5,5 +5,6 @@ idf_component_register(
         retriever_link
         retriever_protocol
         retriever_imu
+        driver
         esp_timer
 )

@@ -57,6 +57,7 @@ void SocketCanTransport::open()
     throw std::runtime_error("bind " + interface_ + " : " + why);
   }
 
+  std::lock_guard<std::mutex> lock(mutex_);
   stats_ = Stats{};
   stats_.connected = true;
 }
@@ -67,6 +68,7 @@ void SocketCanTransport::close()
     ::close(fd_);
     fd_ = -1;
   }
+  std::lock_guard<std::mutex> lock(mutex_);
   stats_.connected = false;
 }
 

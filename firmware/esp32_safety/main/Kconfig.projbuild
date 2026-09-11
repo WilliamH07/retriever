@@ -18,14 +18,24 @@ menu "Retriever"
             default y
             help
                 Sur une DevKitC, la console ESP-IDF et la liaison partagent
-                l'UART0 et le meme pont USB. Avec cette option, les journaux
+                l'UART0 et le meme pont USB. Avec cette option, les ESP_LOGx
                 partent en trames LOG et ressortent dans /rosout cote ROS : un
                 seul cable suffit. Sans elle, il faut mettre la liaison sur
                 UART2 et un second adaptateur USB-serie.
 
-                Les messages du bootloader ROM restent sur l'UART a 115200 et
-                apparaissent comme du bruit au demarrage. Le decodeur les rejette
-                et se recale : c'est sans consequence.
+                ATTENTION a ce que cette option ne fait PAS. Elle detourne la
+                sortie des ESP_LOGx, et rien d'autre. Continuent a ecrire en
+                clair au milieu des paquets, et donc a les corrompre :
+                  - les messages du bootloader ROM, a 115200, au demarrage
+                  - le gestionnaire de panique et la trace d'exception
+                  - l'abandon sur ESP_ERROR_CHECK
+                  - les debordements de pile signales par FreeRTOS
+                  - tout printf() et tout esp_rom_printf()
+
+                Le decodeur les rejette et se recale, donc la liaison survit.
+                Mais c'est precisement la trace de plantage — celle qu'on veut
+                le plus — qui arrive hachee. Pour la lire proprement, brancher
+                un adaptateur sur UART2 ou relancer avec cette option a n.
 
     endmenu
 

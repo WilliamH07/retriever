@@ -33,7 +33,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/magnetic_field.hpp"
-#include "tf2_ros/transform_broadcaster.h"
+#include "tf2_ros/transform_broadcaster.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 
 #include "retriever_link/imu_conversion.hpp"
@@ -281,6 +281,23 @@ private:
         pending_ = ImuSample{};
         return;
       }
+      // ⚠️ IMU_QUAT n'a PAS de compteur : ses huit octets sont pleins. Le
+      // contrôle de `seq` ne rapproche donc que GYRO et ACCEL, et un
+      // quaternion vieux d'un ou plusieurs cycles pourrait passer avec eux si
+      // les QUAT suivants étaient perdus. On borne son âge.
+      const double max_age = 0.5 / (expected_rate_hz_ > 1.0 ? expected_rate_hz_ : 1.0);
+      if ((stamp_now() - pending_stamp_).seconds() > max_age) {
+        dropped_link_++;
+        pending_ = ImuSample{};
+        return;
+      }
+      // Le firmware annonce lui-même ce qu'il a pu mesurer : s'il dit que le
+      // quaternion n'était pas valide, on ne le publie pas.
+      if ((v->flags & 0x01U) == 0U) {
+        dropped_link_++;
+        pending_ = ImuSample{};
+        return;
+      }
       if (v->seq != pending_seq_) {
         // Le compteur ne correspond pas : on est en train d'assembler deux
         // échantillons différents. Publier ce mélange serait pire que de ne
@@ -359,6 +376,7 @@ private:
       }
     }
     last_imu_stamp_ = stamp;
+    last_imu_stamp_ns_.store(stamp.nanoseconds(), std::memory_order_relaxed);
   }
 
   // -----------------------------------------------------------------------
@@ -370,7 +388,8 @@ private:
     if (!v) {
       return;
     }
-    last_heartbeat_ = now();
+    const rclcpp::Time received = now();
+    last_heartbeat_ns_.store(received.nanoseconds(), std::memory_order_relaxed);
     node_hash_.store(v->protocol_hash);
 
     if (v->protocol_hash != protocol::kHash && !hash_reported_) {
@@ -386,13 +405,18 @@ private:
     }
 
     retriever_msgs::msg::NodeStatus msg;
-    msg.header.stamp = last_heartbeat_;
+    msg.header.stamp = received;
     msg.node_id = retriever_msgs::msg::NodeStatus::NODE_SAFETY;
     msg.state = v->state;
     msg.uptime_s = v->uptime_s;
     msg.error_count = v->err_count;
     msg.protocol_hash = v->protocol_hash;
     msg.heartbeat_age_s = 0.0F;
+    {
+      std::lock_guard<std::mutex> lock(node_status_mutex_);
+      last_node_status_ = msg;
+      have_node_status_ = true;
+    }
     node_status_pub_->publish(msg);
   }
 
@@ -499,6 +523,11 @@ private:
     m.type = visualization_msgs::msg::Marker::CUBE;
     m.action = visualization_msgs::msg::Marker::ADD;
     m.pose.orientation.w = 1.0;
+    // ⚠️ Sans ceci, le marqueur est transformé UNE FOIS, à l'horodatage de sa
+    // publication, et reste figé là où il a été placé au démarrage. Verrouillé
+    // au repère, il suit imu_link à chaque mise à jour de la TF — ce qui est
+    // tout l'intérêt de l'afficher.
+    m.frame_locked = true;
     m.scale.x = 0.05;   // une carte BNO085 fait à peu près ça
     m.scale.y = 0.03;
     m.scale.z = 0.008;
@@ -531,6 +560,26 @@ private:
     msg.protocol_hash_node = node_hash_.load();
     msg.protocol_match = (node_hash_.load() != 0U) && (node_hash_.load() == protocol::kHash);
     link_status_pub_->publish(msg);
+
+    // ⚠️ NodeStatus était publié uniquement à la réception d'un battement, donc
+    // toujours avec un âge nul — et le publieur étant latché, un panneau ouvert
+    // après une panne voyait un nœud en parfaite santé. On le republie ici avec
+    // l'âge réel, pour que le seuil des 300 ms du §J.2 soit visible sur le topic
+    // et pas seulement dans les diagnostics.
+    retriever_msgs::msg::NodeStatus node;
+    bool have = false;
+    {
+      std::lock_guard<std::mutex> lock(node_status_mutex_);
+      node = last_node_status_;
+      have = have_node_status_;
+    }
+    if (have) {
+      const std::int64_t hb_ns = last_heartbeat_ns_.load(std::memory_order_relaxed);
+      node.header.stamp = now();
+      node.heartbeat_age_s =
+        static_cast<float>(static_cast<double>(now().nanoseconds() - hb_ns) * 1e-9);
+      node_status_pub_->publish(node);
+    }
 
     diagnostics_.force_update();
   }
@@ -587,9 +636,9 @@ private:
     st.add("echantillons perdus (lien)", dropped_link_.load());
     st.add("ecart de norme du quaternion", norm_error);
 
-    const double age = last_imu_stamp_.nanoseconds() == 0
-                         ? 1e9
-                         : (now() - last_imu_stamp_).seconds();
+    const std::int64_t imu_ns = last_imu_stamp_ns_.load(std::memory_order_relaxed);
+    const double age =
+      imu_ns == 0 ? 1e9 : static_cast<double>(now().nanoseconds() - imu_ns) * 1e-9;
 
     if (age > 1.0) {
       st.summary(
@@ -619,9 +668,9 @@ private:
 
   void diagnose_node(diagnostic_updater::DiagnosticStatusWrapper & st)
   {
-    const double age = last_heartbeat_.nanoseconds() == 0
-                         ? 1e9
-                         : (now() - last_heartbeat_).seconds();
+    const std::int64_t hb_ns = last_heartbeat_ns_.load(std::memory_order_relaxed);
+    const double age =
+      hb_ns == 0 ? 1e9 : static_cast<double>(now().nanoseconds() - hb_ns) * 1e-9;
     st.add("age du battement s", age);
     st.addf("hash du noeud", "0x%08X", node_hash_.load());
     st.addf("hash du calculateur", "0x%08X", protocol::kHash);
@@ -673,8 +722,13 @@ private:
   rclcpp::Time pending_stamp_{0, 0, RCL_ROS_TIME};
   std::uint8_t pending_seq_ = 0;
 
+  // ⚠️ Écrits par le fil de lecture, lus par les rappels de minuterie.
+  // rclcpp::Time fait 16 octets : une lecture déchirée donne un « âge »
+  // aberrant, donc un diagnostic ERROR fantôme. Atomiques en nanosecondes.
+  std::atomic<std::int64_t> last_imu_stamp_ns_{0};
+  std::atomic<std::int64_t> last_heartbeat_ns_{0};
+  // Copie privée au fil de lecture, pour le calcul de cadence.
   rclcpp::Time last_imu_stamp_{0, 0, RCL_ROS_TIME};
-  rclcpp::Time last_heartbeat_{0, 0, RCL_ROS_TIME};
   std::atomic<double> measured_rate_hz_{0.0};
   std::atomic<double> last_norm_error_{0.0};
   std::atomic<double> round_trip_ms_{0.0};
@@ -692,6 +746,9 @@ private:
   std::atomic<std::uint8_t> last_status_mag_{0};
   std::uint16_t ping_seq_ = 0;
   std::string log_line_;
+  std::mutex node_status_mutex_;
+  retriever_msgs::msg::NodeStatus last_node_status_;
+  bool have_node_status_ = false;
 };
 
 }  // namespace retriever::link

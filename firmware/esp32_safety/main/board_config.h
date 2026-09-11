@@ -30,9 +30,14 @@
 #ifndef RETRIEVER_BOARD_CONFIG_H
 #define RETRIEVER_BOARD_CONFIG_H
 
+/* Pour SPI3_HOST. L'interface du composant IMU expose volontairement un `int`
+ * plutot qu'un type ESP-IDF, mais la VALEUR doit bien venir de quelque part. */
+#include "driver/spi_master.h"
+
 /* --- Liaison ------------------------------------------------------------- */
-/* UART0 : le pont USB de la DevKitC. La console ESP-IDF est détournée vers des
- * trames LOG (voir link_log.c), donc un seul câble suffit. */
+/* UART0 : le pont USB de la DevKitC. Les ESP_LOGx sont détournés vers des
+ * trames LOG (voir link_log.c), donc un seul câble suffit — le bootloader et le
+ * gestionnaire de panique, eux, écrivent toujours en clair. */
 #define BOARD_LINK_UART_NUM  0
 #define BOARD_LINK_UART_TX   1
 #define BOARD_LINK_UART_RX   3

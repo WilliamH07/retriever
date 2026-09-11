@@ -8,8 +8,10 @@
  *  ⚠️ Sur une DevKitC, UART0 est câblée sur le pont USB. Si la console ESP-IDF
  *  reste active sur cette UART, ses octets se mélangent aux paquets. Deux
  *  sorties, toutes deux prévues :
- *    - CONFIG_RETRIEVER_LINK_CONSOLE_TUNNEL=y (défaut) : la console est
- *      désactivée et les journaux repartent en trames LOG. Un seul câble.
+ *    - CONFIG_RETRIEVER_LINK_CONSOLE_TUNNEL=y (défaut) : les ESP_LOGx repartent
+ *      en trames LOG. Un seul câble. ⚠️ Le bootloader ROM, le gestionnaire de
+ *      panique et tout printf() continuent d'écrire en clair : le décodeur les
+ *      rejette et se recale, mais la trace de plantage arrive hachée.
  *    - sinon : mettre la liaison sur UART2 et garder la console sur UART0,
  *      au prix d'un second adaptateur USB-série.
  *

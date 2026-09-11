@@ -69,6 +69,14 @@ typedef struct {
     int queue_len;
 } rt_imu_config_t;
 
+/**
+ * Valeur de `quat_accuracy_rad` signifiant « le capteur ne fournit pas
+ * d'estimation ». C'est la borne haute exacte de l'encodage du protocole
+ * (u16 d'échelle 1e-4). ⚠️ Ne JAMAIS publier 0 à la place : pour un EKF, 0
+ * n'est pas « inconnu », c'est « parfait ».
+ */
+#define RT_IMU_ACCURACY_UNREPORTED 6.5535f
+
 #define RT_IMU_VALID_QUAT  0x01u
 #define RT_IMU_VALID_GYRO  0x02u
 #define RT_IMU_VALID_ACCEL 0x04u

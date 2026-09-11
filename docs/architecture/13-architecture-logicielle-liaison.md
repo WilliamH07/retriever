@@ -226,7 +226,9 @@ Trois règles dans l'implémentation, dans cet ordre :
 2. **Ne jamais récurser** — si le transport journalise, le tunnel ne rejournalise pas.
 3. **Ne jamais passer devant** — file normale, jamais la file urgente.
 
-⚠️ Les messages du **bootloader ROM** sortent à 115 200 avant que l'application ne reconfigure l'UART. Ils apparaissent comme du bruit au démarrage. Le décodeur les rejette et se recale : c'est normal, et ce n'est pas un défaut à chercher.
+⚠️ **Ce que le tunnel ne couvre pas.** Il détourne les `ESP_LOGx`, et rien d'autre. Continuent d'écrire en clair au milieu des paquets : les messages du **bootloader ROM** (à 115 200, au démarrage), le **gestionnaire de panique** et la trace d'exception, l'abandon sur `ESP_ERROR_CHECK`, les débordements de pile signalés par FreeRTOS, et tout `printf()`.
+
+Le décodeur les rejette et se recale, donc la liaison survit. Mais c'est précisément la trace de plantage — celle qu'on veut le plus — qui arrive hachée. Pour la lire proprement : un adaptateur sur UART2, ou l'option à `n`. C'est un compromis assumé, pas un oubli.
 
 ---
 
@@ -425,7 +427,7 @@ Les trois trames d'un même échantillon portent le **même compteur `seq`**, et
 | Roulis, tangage | 3,5° = 0,0611 rad | ✅ erreur dynamique de la datasheet BNO08x. Ces deux angles sont observés par la gravité : ils sont bons et stables. |
 | Lacet, plancher | 5° = 0,0873 rad | ✅ §I.2 du dossier, « en pratique typiquement 5° ». On ne croit pas le capteur en dessous, même quand il s'annonce meilleur. |
 | Lacet, valeur courante | `max(estimation du capteur, plancher)` | Le BNO085 fournit une estimation d'erreur de cap en radians ; c'est elle qui sert. |
-| Lacet, si non fourni | 1 rad ≈ 57° | 📐 cas du *game rotation vector*, qui n'a aucune référence de cap. Déclarer le lacet **inconnu** est exact ; publier 0 serait un mensonge. |
+| Lacet, si non fourni | 1 rad ≈ 57° | 📐 cas du *game rotation vector*, qui n'a aucune référence de cap. Déclarer le lacet **inconnu** est exact ; publier 0 serait un mensonge. Le firmware le signale par la sentinelle **6,5535 rad** — la borne haute exacte de l'encodage — que le pont reconnaît. |
 
 ⚠️ 📐 **Hypothèse assumée** : la covariance est diagonale dans les axes du capteur, et l'incertitude de cap est portée par l'axe z du capteur. Ce n'est exact que si le capteur est à peu près horizontal — l'incertitude de cap est en réalité autour de la verticale du lieu. Sur terrain plat, l'écart est négligeable ; sur une pente forte, il ne l'est plus. Le jour où ça compte, la correction consiste à tourner `diag(σ_rp², σ_rp², σ_lacet²)` du monde vers le capteur, pas à bricoler les écarts types.
 

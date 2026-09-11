@@ -76,9 +76,11 @@ def generate_launch_description() -> LaunchDescription:
                         # 0.0.0.0 : Foxglove tourne souvent sur une autre machine
                         # que le calculateur du robot.
                         "address": "0.0.0.0",
-                        # Les QoS des topics capteur sont BEST_EFFORT ; sans
-                        # cela le pont s'abonnerait en RELIABLE et ne recevrait
-                        # rien, ce qui ressemble beaucoup a une panne de liaison.
+                        # Compression WebSocket (permessage-deflate). Sans
+                        # objet en local, et elle coute du CPU sur le
+                        # calculateur. Le pont s'aligne tout seul sur la QoS des
+                        # publieurs : il n'y a rien a regler pour le BEST_EFFORT
+                        # des topics capteur.
                         "use_compression": False,
                         "send_buffer_limit": 10000000,
                     }

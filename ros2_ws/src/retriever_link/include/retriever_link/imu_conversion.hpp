@@ -39,6 +39,7 @@
 #include <cstdint>
 #include <string>
 
+#include "builtin_interfaces/msg/time.hpp"
 #include "sensor_msgs/msg/imu.hpp"
 #include "sensor_msgs/msg/magnetic_field.hpp"
 
@@ -60,9 +61,9 @@ struct ImuNoiseModel
   double orientation_stddev_yaw_min = 0.0873;
 
   /// Lacet quand le capteur ne fournit PAS d'estimation — cas du game rotation
-  /// vector, qui n'a aucune référence de cap. Défaut : 1 rad, c'est-à-dire
-  /// « inconnu », pour que l'EKF cesse d'écouter ce lacet plutôt que de le
-  /// croire. 📐
+  /// vector, qui n'a aucune référence de cap. Le firmware le signale par 0 ou
+  /// par la sentinelle 6,5535 rad. Défaut : 1 rad, c'est-à-dire « inconnu »,
+  /// pour que l'EKF cesse d'écouter ce lacet plutôt que de le croire. 📐
   double orientation_stddev_yaw_unreported = 1.0;
 
   /// 📐 À REMPLACER par la mesure du banc : 60 s à l'arrêt, écart type de

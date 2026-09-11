@@ -186,10 +186,13 @@ static void publish_task(void *arg)
             silence_ms = 0;
         } else {
             silence_ms += 50u;
-            if (silence_ms == 1000u) {
+            if (silence_ms >= 1000u) {
                 /* Un capteur qui se tait ne produit aucune erreur : il faut
                  * aller la chercher. C'est le mode de défaillance le plus
-                 * fréquent d'une IMU sur SPI. */
+                 * fréquent d'une IMU sur SPI.
+                 * ⚠️ Une égalité stricte n'alerterait qu'une seule fois : après
+                 * dix secondes de silence, plus rien. On répète. */
+                silence_ms = 0u;
                 ESP_LOGW(TAG, "aucun echantillon depuis 1 s");
             }
         }
@@ -310,7 +313,14 @@ void app_main(void)
         .mode = RT_IMU_MODE_ROTATION_VECTOR,
 #endif
         .rate_hz = BOARD_IMU_RATE_HZ,
-        .enable_mag = CONFIG_RETRIEVER_IMU_ENABLE_MAG ? true : false,
+#if defined(CONFIG_RETRIEVER_IMU_ENABLE_MAG)
+        /* Kconfig ne definit le symbole QUE lorsque l'option vaut y : dans une
+         * expression C, un symbole absent est une erreur de compilation, pas un
+         * zero. C'est la difference avec une directive #if. */
+        .enable_mag = true,
+#else
+        .enable_mag = false,
+#endif
         .queue_len = BOARD_IMU_QUEUE_LEN,
     };
 
