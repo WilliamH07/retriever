@@ -21,10 +21,12 @@
     frame_id: "imu_link"
 
     link:
-      # 📐 À REMPLACER par la mesure : lancer le nœud, lire round_trip_ms dans
-      # /retriever/link_status pendant une minute, prendre la médiane, diviser
-      # par deux. L'aller simple est ce qu'il faut retrancher à l'horodatage.
-      latency_offset_ms: 1.5
+      # ✅ MESURÉ au banc, 11 septembre 2026 : aller-retour médian 3,14 ms,
+      # max 3,88 ms, sur 100 échantillons à 921600 bauds (tools/link_monitor.py).
+      # L'aller simple est la moitié, et c'est lui qu'on retranche à
+      # l'horodatage. À refaire si le débit, le transport ou la longueur du
+      # câble changent — et entièrement à refaire en CAN.
+      latency_offset_ms: 1.57
       ping_period_s: 1.0
       time_sync: true
 
