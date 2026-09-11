@@ -18,8 +18,27 @@
  *              ──► attendre que H_INTN se réabaisse
  *              ──► TRANSACTION 2 : le paquet ENTIER, en-tête RELU, CS remonte
  *
- *    écriture  WAKE (PS0) bas ──► attendre H_INTN ──► CS bas ──► écrire
- *              ──► CS haut ──► WAKE haut
+ *    écriture  attendre H_INTN bas ──► CS bas ──► écrire ──► CS haut
+ *
+ *  ⚠️ L'écriture NE TOUCHE PAS à PS0/WAKE. La datasheet décrit bien PS0 comme
+ *  un signal de réveil après le reset, mais le pilote de référence Adafruit —
+ *  qui fonctionne — ne s'en sert jamais : il attend H_INTN et écrit. Le
+ *  composant n'est pas mis en veille par ce firmware, il n'y a donc rien à
+ *  réveiller. Tirer PS0 à la masse à chaque écriture ajoutait un aléa sans
+ *  contrepartie, sur la broche qui sélectionne aussi le protocole.
+ *
+ *  ⚠️⚠️ LE SPI EST FULL-DUPLEX, ET LE BNO08x LIT MOSI PENDANT NOS LECTURES.
+ *  Il n'existe pas de « transaction de lecture » pour ce composant : chaque
+ *  transaction est un échange. Ce que le maître sort sur MOSI pendant qu'il
+ *  rentre un paquet, le composant le lit comme un en-tête SHTP venant de
+ *  l'hôte. ESP-IDF, quand `tx_buffer` vaut NULL, ne garnit pas la FIFO
+ *  d'émission : MOSI rejoue le contenu précédent. Le composant voit donc des
+ *  paquets malformés, en empile une erreur sur le canal 0 à chaque lecture, et
+ *  la liste d'erreurs s'allonge indéfiniment — ce qui maintient H_INTN bas,
+ *  donc relance une lecture, donc une erreur de plus. Le pilote de référence
+ *  Adafruit passe explicitement `sendvalue = 0x00` à chaque lecture ; c'est le
+ *  même geste que le tampon de zéros ci-dessous. Un en-tête `00 00 00 00` se
+ *  lit « longueur nulle », et c'est précisément ce qu'on veut dire.
  *
  *  ⚠️ Les deux transactions de lecture sont SÉPARÉES, et le paquet est relu
  *  depuis son début. Garder CS bas entre l'en-tête et le corps — ce qui paraît
@@ -41,6 +60,7 @@
 
 #include "sh2_hal_esp32_spi.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "driver/gpio.h"
@@ -67,6 +87,12 @@ static const char *TAG = "sh2.spi";
  * statique aligné, et on recopie. C'est aussi ce qu'exige la règle §G.4-1 :
  * aucune allocation après l'initialisation. */
 static WORD_ALIGNED_ATTR uint8_t s_staging[SH2_HAL_MAX_TRANSFER_IN];
+
+/* Ce que l'on sort sur MOSI pendant une lecture. En BSS, donc nul, et il le
+ * reste : personne n'écrit dedans. Voir le bandeau — ce n'est pas une
+ * précaution de style, c'est la condition pour que le composant ne prenne pas
+ * chacune de nos lectures pour une écriture malformée. */
+static WORD_ALIGNED_ATTR uint8_t s_zeros[SH2_HAL_MAX_TRANSFER_IN];
 
 typedef struct {
     sh2_Hal_t hal;              /* DOIT rester en premier : sh2 nous rend ce pointeur */
@@ -119,9 +145,16 @@ static esp_err_t spi_rx(uint8_t *dst, size_t len)
     }
     spi_transaction_t t;
     memset(&t, 0, sizeof(t));
+    if (len > sizeof(s_zeros)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
     t.length = len * 8u;
     t.rxlength = len * 8u;
     t.rx_buffer = dst;
+    /* ⚠️ Obligatoire, voir le bandeau : sans tampon d'émission, MOSI rejoue la
+     * transaction précédente et le composant compte une erreur SHTP par
+     * lecture. */
+    t.tx_buffer = s_zeros;
     /* Pas de SPI_TRANS_CS_KEEP_ACTIVE : chaque lecture est une transaction
      * complète, CS compris. Voir le bandeau en tête de fichier. */
     return spi_device_polling_transmit(s_hal.spi, &t);
@@ -148,8 +181,8 @@ static int hal_open(sh2_Hal_t *self)
     }
 
     /* Séquence de sélection du bus (§C15) : PS1 et PS0 hauts AVANT le reset et
-     * jusqu'après la première assertion de H_INTN. PS1 est tiré haut sur la
-     * carte ; PS0 est piloté ici parce qu'il sert ensuite de WAKE. */
+     * jusqu'après la première assertion de H_INTN. PS1 est câblé au 3V3 ; PS0
+     * est piloté ici, et le RESTE HAUT ensuite — plus personne n'y touche. */
     gpio_set_level((gpio_num_t)s_hal.pins.ps0, 1);
     gpio_set_level((gpio_num_t)s_hal.pins.rstn, 0);
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -212,13 +245,17 @@ static int hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t
         *t_us = (uint32_t)esp_timer_get_time();
     }
 
-    /* --- Transaction 1 : l'en-tête seul, CS remonte à la fin -------------- */
-    uint8_t header[4] = {0};
-    if (spi_rx(header, sizeof(header)) != ESP_OK) {
+    /* --- Transaction 1 : l'en-tête seul, CS remonte à la fin --------------
+     *
+     * ⚠️ Dans s_staging, pas sur la pile : le DMA d'ESP-IDF veut une
+     * destination alignée sur 32 bits et arrondit la longueur au multiple de 4
+     * supérieur. Un `uint8_t header[4]` local n'offre ni l'un ni l'autre de
+     * façon garantie. */
+    if (spi_rx(s_staging, 4u) != ESP_OK) {
         return 0;
     }
 
-    const unsigned total = (unsigned)((header[0] | ((unsigned)header[1] << 8)) & 0x7FFFu);
+    const unsigned total = (unsigned)((s_staging[0] | ((unsigned)s_staging[1] << 8)) & 0x7FFFu);
     if (total < 4u) {
         s_counters.empty_headers++;
         return 0;   /* en-tête vide : le composant n'avait rien à dire */
@@ -247,6 +284,22 @@ static int hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t
         return 0;
     }
 
+    /* Canal 0, rapport 0x01 : le composant nous dit ce qu'il nous reproche.
+     * C'est la seule voie par laquelle il le dit ; la pile SH-2 vendue ne
+     * s'abonne pas au canal 0 et jetterait ce paquet en silence. */
+    if (s_staging[2] == 0u && total >= 5u && s_staging[4] == 0x01u) {
+        s_counters.shtp_errors++;
+        if (s_counters.shtp_errors <= 8u || (s_counters.shtp_errors % 2000u) == 0u) {
+            char codes[3 * 16 + 1] = {0};   /* liste vide : reste une chaine valide */
+            int n = 0;
+            for (unsigned i = 5u; i < total && i < 5u + 16u; ++i) {
+                n += snprintf(codes + n, sizeof(codes) - (size_t)n, "%02x ", s_staging[i]);
+            }
+            ESP_LOGE(TAG, "liste d'erreurs SHTP #%u (%u octets) : %s",
+                     (unsigned)s_counters.shtp_errors, total - 5u, codes);
+        }
+    }
+
     memcpy(pBuffer, s_staging, total);
     s_counters.packets++;
     dump_packet(total, len);
@@ -260,26 +313,22 @@ static int hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
         return 0;
     }
 
-    /* Réveil : PS0/WAKE bas, puis on attend que le composant annonce qu'il est
-     * prêt en assertant H_INTN. */
-    gpio_set_level((gpio_num_t)s_hal.pins.ps0, 0);
-    const bool ready = wait_intn(INTN_WAIT_MS);
-    int written = 0;
-    if (ready && spi_tx(pBuffer, len) == ESP_OK) {
-        written = (int)len;
-        s_counters.writes++;
-    }
-    gpio_set_level((gpio_num_t)s_hal.pins.ps0, 1);
-
-    if (!ready) {
+    /* Le composant annonce par H_INTN qu'il est prêt à échanger. On attend, on
+     * écrit, et on ne touche à rien d'autre — surtout pas à PS0, qui est aussi
+     * la broche de sélection de protocole. */
+    if (!wait_intn(INTN_WAIT_MS)) {
         s_counters.wake_timeouts++;
-        /* Limité à une fois : sur une ligne PS0 non câblée, cet avertissement
-         * noie tout le reste. Le compteur, lui, continue. */
         if (s_counters.wake_timeouts == 1u) {
-            ESP_LOGW(TAG, "reveil sans reponse — verifier PS0/WAKE (compteur en diagnostic)");
+            ESP_LOGW(TAG, "ecriture : H_INTN jamais bas (compteur en diagnostic)");
         }
+        return 0;
     }
-    return written;
+
+    if (spi_tx(pBuffer, len) != ESP_OK) {
+        return 0;
+    }
+    s_counters.writes++;
+    return (int)len;
 }
 
 static uint32_t hal_get_time_us(sh2_Hal_t *self)

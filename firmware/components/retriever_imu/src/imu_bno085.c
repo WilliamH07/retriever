@@ -267,10 +267,11 @@ static void report_counters(void)
     rt_sh2_hal_counters_t c;
     rt_sh2_hal_get_counters(&c);
     ESP_LOGI(TAG,
-             "spi lectures=%u paquets=%u vides=%u ecritures=%u reveils=%u repetitions=%u trop_gros=%u",
+             "spi lectures=%u paquets=%u vides=%u ecritures=%u reveils=%u repetitions=%u trop_gros=%u err_shtp=%u",
              (unsigned)c.reads, (unsigned)c.packets, (unsigned)c.empty_headers,
              (unsigned)c.writes, (unsigned)c.wake_timeouts,
-             (unsigned)c.repeat_timeouts, (unsigned)c.oversize);
+             (unsigned)c.repeat_timeouts, (unsigned)c.oversize,
+             (unsigned)c.shtp_errors);
     ESP_LOGI(TAG, "evenements total=%u quat=%u gyro=%u accel=%u indecodables=%u",
              (unsigned)s_ev_total, (unsigned)s_ev_quat, (unsigned)s_ev_gyro,
              (unsigned)s_ev_accel, (unsigned)s_ev_decode_fail);

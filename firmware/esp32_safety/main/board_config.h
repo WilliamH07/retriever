@@ -56,7 +56,14 @@
 #define BOARD_IMU_INTN       25          /* actif bas, obligatoire */
 #define BOARD_IMU_RSTN       33          /* actif bas */
 #define BOARD_IMU_PS0        26          /* PS0/WAKE — piloté, jamais câblé en dur */
-#define BOARD_IMU_CLOCK_HZ   3000000     /* 3 MHz maximum ✅ */
+/* 1 MHz, pas 3.
+ *
+ * La datasheet autorise 3 MHz ✅ ; le pilote Adafruit, lui, qui fonctionne,
+ * construit son bus à 1 MHz. Pour un flux de 100 Hz, un paquet SHTP de
+ * vingt octets prend 160 µs à 1 MHz : la marge de temps ne coûte rien ici,
+ * alors qu'une marge insuffisante sur MOSI ne se voit que sous la forme
+ * d'écritures refusées par le composant, sans aucune erreur côté maître. */
+#define BOARD_IMU_CLOCK_HZ   1000000
 
 /*  Câblage du banc.
  *

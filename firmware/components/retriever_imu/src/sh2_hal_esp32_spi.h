@@ -42,7 +42,10 @@ typedef struct {
     uint32_t packets;        /**< paquets SHTP complets rendus à la pile */
     uint32_t empty_headers;  /**< en-têtes sans corps : normal, mais révélateur en masse */
     uint32_t writes;         /**< écritures abouties */
-    uint32_t wake_timeouts;  /**< ⚠️ réveils sans réponse — PS0/WAKE suspect */
+    uint32_t wake_timeouts;  /**< H_INTN jamais bas au moment d'écrire */
+    uint32_t repeat_timeouts;/**< en-tête lu, mais le paquet n'a jamais été represente */
+    uint32_t oversize;       /**< paquet plus grand que le tampon de la pile */
+    uint32_t shtp_errors;    /**< ⚠️ listes d'erreurs reçues du composant sur le canal 0 */
 } rt_sh2_hal_counters_t;
 
 void rt_sh2_hal_get_counters(rt_sh2_hal_counters_t *out);
