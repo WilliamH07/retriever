@@ -95,6 +95,15 @@ static uint64_t rt_imu_now_us(void)
 
 static uint64_t s_last_mag_us;
 
+/* Un événement décodé par grandeur. Quand le triplet ne se complète jamais,
+ * c'est ce tableau qui dit lequel des trois manque — et s'il en manque un ou
+ * les trois, le diagnostic n'est pas le même. */
+static uint32_t s_ev_total;
+static uint32_t s_ev_quat;
+static uint32_t s_ev_gyro;
+static uint32_t s_ev_accel;
+static uint32_t s_ev_decode_fail;
+
 static void publish_if_complete(void)
 {
     const uint8_t needed = RT_IMU_VALID_QUAT | RT_IMU_VALID_GYRO | RT_IMU_VALID_ACCEL;
@@ -117,8 +126,10 @@ static void publish_if_complete(void)
 static void on_sensor(void *cookie, sh2_SensorEvent_t *event)
 {
     (void)cookie;
+    s_ev_total++;
     sh2_SensorValue_t v;
     if (sh2_decodeSensorEvent(&v, event) != SH2_OK) {
+        s_ev_decode_fail++;
         return;
     }
 
@@ -139,6 +150,7 @@ static void on_sensor(void *cookie, sh2_SensorEvent_t *event)
         s_building.quat_accuracy_rad = v.un.rotationVector.accuracy;
         s_building.status_rot = (uint8_t)(v.status & 0x03u);
         s_building.valid |= RT_IMU_VALID_QUAT;
+        s_ev_quat++;
         break;
 
     case SH2_GAME_ROTATION_VECTOR:
@@ -165,6 +177,7 @@ static void on_sensor(void *cookie, sh2_SensorEvent_t *event)
         s_building.gyro[2] = v.un.gyroscope.z;
         s_building.status_gyro = (uint8_t)(v.status & 0x03u);
         s_building.valid |= RT_IMU_VALID_GYRO;
+        s_ev_gyro++;
         break;
 
     case SH2_ACCELEROMETER:
@@ -176,6 +189,7 @@ static void on_sensor(void *cookie, sh2_SensorEvent_t *event)
         s_building.accel[2] = v.un.accelerometer.z;
         s_building.status_accel = (uint8_t)(v.status & 0x03u);
         s_building.valid |= RT_IMU_VALID_ACCEL;
+        s_ev_accel++;
         break;
 
     case SH2_MAGNETIC_FIELD_CALIBRATED:
@@ -248,10 +262,24 @@ static esp_err_t configure_reports(void)
  *  Tâche de service
  * ----------------------------------------------------------------------- */
 
+static void report_counters(void)
+{
+    rt_sh2_hal_counters_t c;
+    rt_sh2_hal_get_counters(&c);
+    ESP_LOGI(TAG,
+             "spi lectures=%u paquets=%u vides=%u ecritures=%u reveils_manques=%u",
+             (unsigned)c.reads, (unsigned)c.packets, (unsigned)c.empty_headers,
+             (unsigned)c.writes, (unsigned)c.wake_timeouts);
+    ESP_LOGI(TAG, "evenements total=%u quat=%u gyro=%u accel=%u indecodables=%u",
+             (unsigned)s_ev_total, (unsigned)s_ev_quat, (unsigned)s_ev_gyro,
+             (unsigned)s_ev_accel, (unsigned)s_ev_decode_fail);
+}
+
 static void imu_task(void *arg)
 {
     (void)arg;
     uint32_t last_resets = s_resets;
+    int64_t next_report_us = esp_timer_get_time() + 5000000;
 
     for (;;) {
         /* H_INTN est le signal : le composant prévient quand il a quelque
@@ -259,6 +287,12 @@ static void imu_task(void *arg)
          * constater qu'il ne dit plus rien. */
         rt_sh2_hal_wait_intn(50);
         sh2_service();
+
+        const int64_t now_us = esp_timer_get_time();
+        if (now_us >= next_report_us) {
+            next_report_us = now_us + 5000000;   /* toutes les 5 s */
+            report_counters();
+        }
 
         if (s_resets != last_resets) {
             last_resets = s_resets;

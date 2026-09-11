@@ -66,6 +66,9 @@ typedef struct {
 } esp32_hal_t;
 
 static esp32_hal_t s_hal;
+static rt_sh2_hal_counters_t s_counters;
+
+void rt_sh2_hal_get_counters(rt_sh2_hal_counters_t *out) { *out = s_counters; }
 
 /* --------------------------------------------------------------------------
  *  H_INTN
@@ -188,6 +191,7 @@ static int hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t
         return 0;   /* rien à lire : ce n'est pas une erreur */
     }
     xSemaphoreTake(s_hal.intn, 0);
+    s_counters.reads++;
 
     /* L'horodatage est pris ICI, au plus près de l'événement matériel. C'est
      * tout l'intérêt de mettre l'IMU sur le microcontrôleur plutôt que sur le
@@ -214,6 +218,7 @@ static int hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t
     if (total <= 4u) {
         /* En-tête vide, ou réduit à lui-même : rien à lire de plus. */
         spi_cs_release();
+        s_counters.empty_headers++;
         if (total == 4u) {
             memcpy(pBuffer, s_staging, 4);
             result = 4;
@@ -222,6 +227,7 @@ static int hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t
         if (spi_rx(s_staging + 4, total - 4u, false) == ESP_OK) {
             memcpy(pBuffer, s_staging, total);
             result = (int)total;
+            s_counters.packets++;
         } else {
             spi_cs_release();
         }
@@ -259,11 +265,17 @@ static int hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
     int written = 0;
     if (ready && spi_tx(pBuffer, len) == ESP_OK) {
         written = (int)len;
+        s_counters.writes++;
     }
     gpio_set_level((gpio_num_t)s_hal.pins.ps0, 1);
 
     if (!ready) {
-        ESP_LOGW(TAG, "ecriture refusee : pas de reveil");
+        s_counters.wake_timeouts++;
+        /* Limité à une fois : sur une ligne PS0 non câblée, cet avertissement
+         * noie tout le reste. Le compteur, lui, continue. */
+        if (s_counters.wake_timeouts == 1u) {
+            ESP_LOGW(TAG, "reveil sans reponse — verifier PS0/WAKE (compteur en diagnostic)");
+        }
     }
     return written;
 }
