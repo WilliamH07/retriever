@@ -181,6 +181,26 @@ static void hal_close(sh2_Hal_t *self)
     s_hal.open = false;
 }
 
+/**
+ * Montre les premiers paquets, puis un sur dix mille.
+ *
+ * Un en-tête SHTP valide, c'est : longueur sur 16 bits petit-boutiste (bit 15 =
+ * continuation, masqué), puis le CANAL — 0 à 5 — puis un numéro de séquence.
+ * Un canal supérieur à 5, ou une longueur qui ne bouge jamais, disent
+ * immédiatement si l'on lit un vrai flux ou de la bouillie qui se trouve
+ * ressembler à une longueur.
+ */
+static void dump_packet(unsigned total, unsigned len)
+{
+    const uint32_t n = s_counters.packets;
+    if (n > 6u && (n % 10000u) != 0u) {
+        return;
+    }
+    ESP_LOGI(TAG, "paquet %u : total=%u tampon=%u canal=%u seq=%u | %02x %02x %02x %02x %02x %02x %02x %02x",
+             (unsigned)n, total, len, s_staging[2], s_staging[3], s_staging[0], s_staging[1],
+             s_staging[2], s_staging[3], s_staging[4], s_staging[5], s_staging[6], s_staging[7]);
+}
+
 static int hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t_us)
 {
     (void)self;
@@ -228,6 +248,7 @@ static int hal_read(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len, uint32_t *t
             memcpy(pBuffer, s_staging, total);
             result = (int)total;
             s_counters.packets++;
+            dump_packet(total, len);
         } else {
             spi_cs_release();
         }
