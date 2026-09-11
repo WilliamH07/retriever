@@ -42,6 +42,9 @@ exactly that reason.
 | [robot_localization](https://github.com/cra-ros-pkg/robot_localization) | BSD 3 Clause | State estimation |
 | [ros2_socketcan](https://github.com/autowarefoundation/ros2_socketcan) | Apache 2.0 | CAN interface |
 | [husky/husky](https://github.com/husky/husky) | BSD 3 Clause | Package naming conventions |
+| [ceva-dsp/sh2](https://github.com/ceva-dsp/sh2) | Apache 2.0 | BNO085 sensor hub stack, vendored as a submodule at v1.4.0 and unmodified. The ESP32 SPI port is this project's own. |
+| [foxglove_bridge](https://github.com/foxglove/ros-foxglove-bridge) | MIT | WebSocket bridge for visualisation |
+| [diagnostic_updater](https://github.com/ros/diagnostics) | BSD 3 Clause | Diagnostics |
 
 ## Prior work by the author
 
@@ -49,3 +52,9 @@ Retriever follows a full rebuild of the [Niryo
 One](https://github.com/NiryoRobotics/niryo_one), an open source six axis
 robotic arm. That project is where most of the practical knowledge behind this
 one came from.
+
+## Algorithms
+
+The serial framing uses Consistent Overhead Byte Stuffing, described in
+Cheshire & Baker, *Consistent Overhead Byte Stuffing*, IEEE/ACM Transactions on
+Networking, 1999. The implementation is this project's own; the idea is theirs.

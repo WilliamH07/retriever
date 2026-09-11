@@ -1,0 +1,481 @@
+# =============================================================================
+#  protocol.yaml — Retriever · source unique de vérité du protocole de liaison
+# =============================================================================
+#  Ce fichier décrit TOUTES les trames échangées entre le calculateur et les
+#  microcontrôleurs. Il génère, par `generate.py` :
+#
+#    firmware/protocol/generated/retriever_protocol.h                   (C99)
+#    ros2_ws/src/retriever_protocol/include/retriever_protocol/          (C++17)
+#      protocol.hpp
+#    docs/architecture/generated/protocol-tables.md                      (doc)
+#
+#  RÈGLE : on ne recopie JAMAIS une constante de ce fichier à la main dans du
+#  code. Toute constante utilisée par le firmware ou par ROS 2 vient de
+#  l'en-tête généré. `tools/check_protocol_sync.py` échoue en CI si les fichiers
+#  générés ne correspondent plus à ce YAML.
+#
+#  Le champ meta.hash est calculé par le générateur sur le contenu normalisé du
+#  fichier. Il est compilé dans le firmware et remonté dans chaque HEARTBEAT :
+#  une divergence entre un nœud et le calculateur est un refus d'armement, pas
+#  un avertissement (§K.2 [P3]).
+#
+#  Version : 0.1.0 — 11 septembre 2026
+#  Référence : dossier d'architecture §F.3 (plan d'adressage), §AB (couche de
+#  liaison). Les écarts par rapport au §F.3 sont listés dans §AB.7.
+# =============================================================================
+
+meta:
+  version: "0.1.0"
+  date: "2026-09-11"
+  endianness: little          # Intel. Aucun échange d'octets sur ESP32 ni x86.
+  id_bits: 11                 # CAN 2.0A. Conservé tel quel sur le transport série.
+  max_payload: 8              # Contrainte CAN. Volontairement conservée en série.
+
+  transports:
+    can:
+      bitrate: 500000
+      standard: "CAN 2.0A, 11 bits, ISO 11898-2"
+      status: target          # cible, non câblée : la carte CAN n'est pas conçue
+    serial:
+      framing: cobs           # délimiteur 0x00, voir §AC
+      crc: crc16_ccitt_false  # polynôme 0x1021, init 0xFFFF, pas de réflexion
+      default_baud: 921600
+      status: bench           # transport de développement UNIQUEMENT (§AB.5)
+
+# -----------------------------------------------------------------------------
+#  Énumérations
+# -----------------------------------------------------------------------------
+enums:
+
+  node_id:
+    doc: "Identité d'un nœud. Sert d'index dans HEARTBEAT (0x700 + node_id)."
+    values:
+      HOST:    0    # le calculateur lui-même (X1)
+      SAFETY:  1
+      MOTION_FRONT: 2
+      MOTION_REAR:  3
+
+  node_state:
+    doc: "État de haut niveau publié par tout nœud dans son HEARTBEAT."
+    values:
+      BOOT:      0   # avant self_test
+      SELFTEST:  1
+      READY:     2   # opérationnel, pas d'autorisation de mouvement
+      ACTIVE:    3   # autorisé à agir
+      DEGRADED:  4
+      FAULT:     5
+
+  safety_state:
+    doc: "FSM de sécurité de l'ESP32-SAFETY (§J.2). Autoritaire."
+    values:
+      INIT:          0
+      SAFE:          1
+      PRECHARGE:     2
+      LIVE_DISARMED: 3
+      LIVE_ARMED:    4
+      BRAKING:       5
+      FAULT:         6
+      ESTOP:         7
+
+  fault_cause:
+    doc: >
+      Cause du dernier passage en BRAKING / FAULT / ESTOP. Mémorisée et publiée
+      tant que le défaut n'est pas acquitté : un robot qui s'arrête doit dire
+      pourquoi (§J.2).
+    values:
+      NONE:              0
+      ESTOP_BUTTON:      1
+      HOST_HEARTBEAT:    2
+      NODE_HEARTBEAT:    3
+      BUS_OFF:           4
+      OVERCURRENT:       5
+      OVERCURRENT_SLOW:  6
+      UNDERVOLTAGE:      7
+      OVERVOLTAGE_REGEN: 8
+      OVERTEMP:          9
+      TILT:             10
+      PRECHARGE_TIMEOUT: 11
+      CONTACTOR_STUCK:  12
+      WATCHDOG:         13
+      PROTOCOL_MISMATCH: 14
+      SELFTEST_FAILED:  15
+
+  wheel_flag:
+    doc: "Drapeaux par roue (§H.5). Champ de bits."
+    bitfield: true
+    values:
+      STALL:       0x01
+      HALL_FAULT:  0x02
+      CMD_TIMEOUT: 0x04
+      DRIVER_FAULT: 0x08
+      CURRENT_LIMIT: 0x10
+      OVERTEMP:    0x20
+
+  log_level:
+    doc: "Niveau d'un fragment de journal tunnellisé (§AC.5)."
+    values:
+      ERROR: 0
+      WARN:  1
+      INFO:  2
+      DEBUG: 3
+
+# -----------------------------------------------------------------------------
+#  Trames
+# -----------------------------------------------------------------------------
+#  Champs : type parmi u8 u16 u32 u64 i8 i16 i32, plus `scale`, `offset`,
+#  `unit`, `enum`, `bits`. Un champ avec `scale` est exposé en float côté API et
+#  transporté en entier : la conversion est dans le code généré, jamais dans le
+#  code applicatif.
+#
+#  `impl` indique où en est la trame :
+#    done    implémentée des deux côtés
+#    bench   implémentée pour le banc en cours
+#    planned décrite, générée, mais aucun code ne l'émet encore
+# -----------------------------------------------------------------------------
+frames:
+
+  # --- Sécurité : priorité maximale -----------------------------------------
+  - name: SAFETY_STATE
+    id: 0x010
+    sender: SAFETY
+    rate_hz: 100
+    impl: planned
+    doc: "Miroir de la FSM de sécurité. Aucune autorité côté ROS : lecture seule."
+    fields:
+      - {name: state,        type: u8,  enum: safety_state}
+      - {name: cause,        type: u8,  enum: fault_cause}
+      - {name: arm_blockers, type: u16, doc: "Bitmap des 11 conditions d'armement non satisfaites (§J.2)"}
+      - {name: flags,        type: u8,  doc: "b0 estop_input b1 contactor_cmd b2 safe_line b3 bench_mode"}
+      - {name: counter,      type: u8,  doc: "Incrémenté à chaque émission, détection de gel"}
+      - {name: uptime_s,     type: u16, unit: s}
+
+  - name: ESTOP_REQUEST
+    id: 0x020
+    sender: HOST
+    rate_hz: 0
+    impl: planned
+    doc: "Arrêt logiciel demandé par le calculateur. N'est PAS un arrêt d'urgence."
+    fields:
+      - {name: magic, type: u8, doc: "0xE5 — une trame corrompue ne doit pas armer un arrêt par hasard"}
+
+  # --- Commandes moteur ------------------------------------------------------
+  - name: CMD_WHEELS_FRONT
+    id: 0x100
+    sender: HOST
+    rate_hz: 50
+    impl: planned
+    doc: "Consignes de vitesse roues avant. Gauche puis droite."
+    fields:
+      - {name: left,  type: i16, scale: 0.001, unit: rad/s}
+      - {name: right, type: i16, scale: 0.001, unit: rad/s}
+      - {name: seq,   type: u8,  doc: "Compteur cyclique, rejet des trames rejouées"}
+      - {name: crc8,  type: u8,  doc: "CRC8 applicatif sur les 5 octets précédents (§Q niveau 2)"}
+
+  - name: CMD_WHEELS_REAR
+    id: 0x101
+    sender: HOST
+    rate_hz: 50
+    impl: planned
+    like: CMD_WHEELS_FRONT
+
+  # --- Retours moteur --------------------------------------------------------
+  - name: FB_WHEELS_FRONT
+    id: 0x180
+    sender: MOTION_FRONT
+    rate_hz: 50
+    impl: planned
+    doc: "Vitesses mesurées et incréments de position, roues avant."
+    fields:
+      - {name: vel_left,   type: i16, scale: 0.001, unit: rad/s}
+      - {name: vel_right,  type: i16, scale: 0.001, unit: rad/s}
+      - {name: dpos_left,  type: i16, unit: counts, doc: "Incrément de comptes depuis la trame précédente"}
+      - {name: dpos_right, type: i16, unit: counts}
+
+  - name: FB_WHEELS_REAR
+    id: 0x181
+    sender: MOTION_REAR
+    rate_hz: 50
+    impl: planned
+    like: FB_WHEELS_FRONT
+
+  - name: MOT_STATUS_FRONT
+    id: 0x190
+    sender: MOTION_FRONT
+    rate_hz: 10
+    impl: planned
+    fields:
+      - {name: flags_left,  type: u8, enum: wheel_flag}
+      - {name: flags_right, type: u8, enum: wheel_flag}
+      - {name: temp_c,      type: i8, unit: degC, doc: "Dissipateur, NTC"}
+      - {name: seq,         type: u8}
+
+  - name: MOT_STATUS_REAR
+    id: 0x191
+    sender: MOTION_REAR
+    rate_hz: 10
+    impl: planned
+    like: MOT_STATUS_FRONT
+
+  # --- Puissance et batterie -------------------------------------------------
+  - name: POWER
+    id: 0x200
+    sender: SAFETY
+    rate_hz: 20
+    impl: planned
+    doc: "Mesures de la chaîne de puissance. I_bus est signé : négatif = régénération."
+    fields:
+      - {name: v_bus,  type: u16, scale: 0.001, unit: V, doc: "Aval contacteur"}
+      - {name: v_pack, type: u16, scale: 0.001, unit: V, doc: "Amont contacteur"}
+      - {name: i_bus,  type: i16, scale: 0.001, unit: A}
+      - {name: flags,  type: u8,  doc: "b0 budget_limiting b1 regen b2 precharge_active"}
+      - {name: seq,    type: u8}
+
+  - name: BATTERY
+    id: 0x201
+    sender: SAFETY
+    rate_hz: 2
+    impl: planned
+    doc: "Télémétrie lue dans le BMS M365 en LECTURE SEULE (§F.5-L5)."
+    fields:
+      - {name: soc_pct,    type: u8,  unit: "%"}
+      - {name: temp_c,     type: i8,  unit: degC}
+      - {name: current_ma, type: i32, unit: mA, doc: "Courant rapporté par le BMS, pas par l'ACS758"}
+      - {name: cycles,     type: u16}
+
+  - name: CELLS_A
+    id: 0x202
+    sender: SAFETY
+    rate_hz: 0.2
+    impl: planned
+    doc: "Tensions des cellules 1 à 4."
+    fields:
+      - {name: cell1, type: u16, unit: mV}
+      - {name: cell2, type: u16, unit: mV}
+      - {name: cell3, type: u16, unit: mV}
+      - {name: cell4, type: u16, unit: mV}
+
+  - name: CELLS_B
+    id: 0x203
+    sender: SAFETY
+    rate_hz: 0.2
+    impl: planned
+    doc: "Tensions des cellules 5 à 8."
+    fields:
+      - {name: cell5, type: u16, unit: mV}
+      - {name: cell6, type: u16, unit: mV}
+      - {name: cell7, type: u16, unit: mV}
+      - {name: cell8, type: u16, unit: mV}
+
+  - name: CELLS_C
+    id: 0x204
+    sender: SAFETY
+    rate_hz: 0.2
+    impl: planned
+    doc: "Cellules 9 et 10, puis le delta inter-cellules — l'indicateur de santé n°1."
+    fields:
+      - {name: cell9,    type: u16, unit: mV}
+      - {name: cell10,   type: u16, unit: mV}
+      - {name: cell_min, type: u16, unit: mV}
+      - {name: delta_mv, type: u16, unit: mV}
+
+  # --- IMU -------------------------------------------------------------------
+  #  Les trois trames d'un même échantillon sont émises à la suite, dans
+  #  l'ordre QUAT, GYRO, ACCEL. Le compteur `seq` de GYRO identifie le triplet.
+  - name: IMU_QUAT
+    id: 0x210
+    sender: SAFETY
+    rate_hz: 100
+    impl: bench
+    doc: >
+      Quaternion du Rotation Vector, format Q14 — le format natif du BNO085,
+      donc aucune perte de conversion. Les 8 octets sont pleins : le compteur
+      et la qualité voyagent dans GYRO et IMU_STATUS.
+    fields:
+      - {name: w, type: i16, scale: 0.00006103515625, unit: "1", doc: "Q14, 1/16384"}
+      - {name: x, type: i16, scale: 0.00006103515625, unit: "1"}
+      - {name: y, type: i16, scale: 0.00006103515625, unit: "1"}
+      - {name: z, type: i16, scale: 0.00006103515625, unit: "1"}
+
+  - name: IMU_GYRO
+    id: 0x211
+    sender: SAFETY
+    rate_hz: 100
+    impl: bench
+    doc: "Gyromètre calibré. Pleine échelle ±16,38 rad/s (±938 °/s) 📐."
+    fields:
+      - {name: gx,    type: i16, scale: 0.0005, unit: rad/s}
+      - {name: gy,    type: i16, scale: 0.0005, unit: rad/s}
+      - {name: gz,    type: i16, scale: 0.0005, unit: rad/s}
+      - {name: seq,   type: u8,  doc: "Identifie le triplet QUAT+GYRO+ACCEL"}
+      - {name: flags, type: u8,  doc: "b0 quat_valid b1 gyro_valid b2 accel_valid b3 stale"}
+
+  - name: IMU_ACCEL
+    id: 0x212
+    sender: SAFETY
+    rate_hz: 100
+    impl: bench
+    doc: "Accélération, gravité incluse. Pleine échelle ±65,5 m/s² 📐."
+    fields:
+      - {name: ax,    type: i16, scale: 0.002, unit: m/s^2}
+      - {name: ay,    type: i16, scale: 0.002, unit: m/s^2}
+      - {name: az,    type: i16, scale: 0.002, unit: m/s^2}
+      - {name: seq,   type: u8}
+      - {name: flags, type: u8}
+
+  - name: IMU_MAG
+    id: 0x214
+    sender: SAFETY
+    rate_hz: 10
+    impl: bench
+    doc: >
+      Champ magnétique calibré. Pleine échelle ±327 µT 📐 — le champ terrestre
+      vaut 25 à 65 µT selon le lieu, donc la marge sert à VOIR les
+      perturbations plutôt qu'à les saturer. C'est précisément l'usage prévu :
+      juger si le cap magnétique restera exploitable une fois l'IMU montée près
+      de quatre moteurs-roues (§N.3).
+    fields:
+      - {name: mx,    type: i16, scale: 0.01, unit: uT}
+      - {name: my,    type: i16, scale: 0.01, unit: uT}
+      - {name: mz,    type: i16, scale: 0.01, unit: uT}
+      - {name: seq,   type: u8}
+      - {name: flags, type: u8, doc: "b0..b1 statut d'étalonnage du magnétomètre"}
+
+  - name: IMU_STATUS
+    id: 0x213
+    sender: SAFETY
+    rate_hz: 10
+    impl: bench
+    doc: >
+      Qualité et santé de l'IMU. `quat_accuracy` est l'estimation d'erreur en
+      radians fournie par le BNO085 ; c'est elle qui alimente la covariance
+      d'orientation publiée sur /imu/data. Une covariance nulle fait diverger
+      l'EKF (§I.2), donc ce champ n'est pas décoratif.
+    fields:
+      - {name: quat_accuracy, type: u16, scale: 0.0001, unit: rad}
+      - {name: status_rot,    type: u8, doc: "0 unreliable, 1 low, 2 medium, 3 high"}
+      - {name: status_gyro,   type: u8}
+      - {name: status_accel,  type: u8}
+      - {name: reset_count,   type: u8, doc: "Resets du BNO085 depuis le boot — doit rester à 0"}
+      - {name: dropped,       type: u16, doc: "Échantillons perdus faute de place en file"}
+
+  - name: THERMAL
+    id: 0x220
+    sender: SAFETY
+    rate_hz: 1
+    impl: planned
+    fields:
+      - {name: temp_a_c,  type: i8, unit: degC}
+      - {name: temp_b_c,  type: i8, unit: degC}
+      - {name: fan_a_pct, type: u8, unit: "%"}
+      - {name: fan_b_pct, type: u8, unit: "%"}
+      - {name: rpm_a,     type: u16, unit: rpm}
+      - {name: rpm_b,     type: u16, unit: rpm}
+
+  # --- Service ---------------------------------------------------------------
+  - name: TIME_SYNC
+    id: 0x300
+    sender: HOST
+    rate_hz: 1
+    impl: bench
+    doc: >
+      Horloge ROS émise par le calculateur. Chaque nœud mémorise le couple
+      (t_host, t_local) ; le calculateur entretient la régression linéaire
+      t_ros = a·t_local + b (§F.4).
+    fields:
+      - {name: t_host_us, type: u64, unit: us, doc: "rclcpp::Clock now() en microsecondes"}
+
+  - name: ARM_REQUEST
+    id: 0x310
+    sender: HOST
+    rate_hz: 0
+    impl: planned
+    fields:
+      - {name: arm,   type: u8, doc: "1 armer, 0 désarmer"}
+      - {name: magic, type: u8, doc: "0xA7"}
+
+  - name: CONFIG
+    id: 0x320
+    sender: HOST
+    rate_hz: 0
+    impl: planned
+    doc: >
+      Paramètres écrits une fois au démarrage. ⚠️ Une valeur reçue ici ne peut
+      que RÉDUIRE une limite de sécurité, jamais l'augmenter (§G.4 règle 3).
+    fields:
+      - {name: key,   type: u16}
+      - {name: value, type: i32}
+      - {name: seq,   type: u8}
+      - {name: magic, type: u8, doc: "0xC0"}
+
+  - name: LINK_PING
+    id: 0x330
+    sender: HOST
+    rate_hz: 0
+    impl: bench
+    doc: "Mesure de latence aller-retour applicative (§Q niveau 2)."
+    fields:
+      - {name: target,  type: u8, enum: node_id}
+      - {name: seq,     type: u16}
+      - {name: t_tx_us, type: u32, unit: us}
+
+  - name: LINK_PONG
+    id: 0x331
+    sender: SAFETY
+    rate_hz: 0
+    impl: bench
+    doc: "Écho de LINK_PING, renvoyé sans traitement dans la tâche de réception."
+    fields:
+      - {name: source,  type: u8, enum: node_id}
+      - {name: seq,     type: u16}
+      - {name: t_tx_us, type: u32, unit: us, doc: "Recopié tel quel depuis le PING"}
+
+  - name: LOG
+    id: 0x7F0
+    sender: SAFETY
+    rate_hz: 0
+    impl: bench
+    doc: >
+      Fragment de journal firmware tunnellisé sur la liaison (§AC.5). Permet de
+      garder UN SEUL câble sur le banc : la console ESP-IDF n'occupe plus
+      l'UART, et les journaux du firmware arrivent dans /rosout.
+      ⚠️ Jamais bloquant : un fragment qui ne rentre pas en file est perdu, et
+      compté. Le journal ne doit jamais retarder la boucle de contrôle.
+    fields:
+      - {name: header, type: u8, doc: "b7..b5 niveau (log_level), b4 fin de ligne, b3..b0 longueur utile 0..7"}
+      - {name: c0, type: u8}
+      - {name: c1, type: u8}
+      - {name: c2, type: u8}
+      - {name: c3, type: u8}
+      - {name: c4, type: u8}
+      - {name: c5, type: u8}
+      - {name: c6, type: u8}
+
+  # --- Heartbeats : 0x700 + node_id -----------------------------------------
+  - name: HEARTBEAT_SAFETY
+    id: 0x701
+    sender: SAFETY
+    rate_hz: 10
+    impl: bench
+    doc: >
+      ⚠️ Écart assumé par rapport au §F.3, qui annonçait DLC 4. Le §K.2 [P3]
+      exige que le heartbeat porte le hash du protocole ; quatre octets ne
+      suffisent pas à porter état + uptime + erreurs + hash. DLC 8.
+    fields:
+      - {name: state,         type: u8, enum: node_state}
+      - {name: uptime_s,      type: u16, unit: s}
+      - {name: err_count,     type: u8, doc: "Erreurs de liaison cumulées, saturé à 255"}
+      - {name: protocol_hash, type: u32, doc: "32 bits de tête du hash de protocol.yaml"}
+
+  - name: HEARTBEAT_MOTION_FRONT
+    id: 0x702
+    sender: MOTION_FRONT
+    rate_hz: 10
+    impl: planned
+    like: HEARTBEAT_SAFETY
+
+  - name: HEARTBEAT_MOTION_REAR
+    id: 0x703
+    sender: MOTION_REAR
+    rate_hz: 10
+    impl: planned
+    like: HEARTBEAT_SAFETY

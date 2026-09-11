@@ -1,0 +1,77 @@
+menu "Retriever"
+
+    menu "Liaison"
+
+        config RETRIEVER_LINK_BACKEND_TWAI
+            bool "Utiliser le bus CAN (TWAI) au lieu de la liaison serie"
+            default n
+            help
+                Non par defaut : la carte safety_bus_distribution n'est pas
+                fabriquee et aucun transceiver n'est cable. Basculer cette
+                option est la SEULE modification de firmware que demande le
+                passage de la serie au CAN. Avant de le faire, relire le §F.2
+                du dossier : terminaisons 120 ohms aux deux extremites, STB du
+                transceiver a la masse, GPIO5 haut au boot.
+
+        config RETRIEVER_LINK_CONSOLE_TUNNEL
+            bool "Faire passer les journaux du firmware dans la liaison"
+            default y
+            help
+                Sur une DevKitC, la console ESP-IDF et la liaison partagent
+                l'UART0 et le meme pont USB. Avec cette option, les journaux
+                partent en trames LOG et ressortent dans /rosout cote ROS : un
+                seul cable suffit. Sans elle, il faut mettre la liaison sur
+                UART2 et un second adaptateur USB-serie.
+
+                Les messages du bootloader ROM restent sur l'UART a 115200 et
+                apparaissent comme du bruit au demarrage. Le decodeur les rejette
+                et se recale : c'est sans consequence.
+
+    endmenu
+
+    menu "Capteur inertiel"
+
+        choice RETRIEVER_IMU_MODE
+            prompt "Fusion d'orientation"
+            default RETRIEVER_IMU_MODE_RV
+            help
+                Quel rapport d'orientation demander au BNO085.
+
+            config RETRIEVER_IMU_MODE_RV
+                bool "Rotation vector — 9 axes, cap absolu"
+                help
+                    Cap absolu par rapport au nord magnetique. C'est le choix
+                    du banc, parce qu'il permet de JUGER la qualite magnetique
+                    du site. Attention : sur le robot assemble, le magnetometre
+                    sera a proximite de quatre moteurs-roues, et le §N.3 le
+                    designe deja comme le maillon faible.
+
+            config RETRIEVER_IMU_MODE_GAME
+                bool "Game rotation vector — 6 axes, immunite magnetique"
+                help
+                    Pas de magnetometre, donc aucune perturbation par les
+                    moteurs, mais aucun cap absolu et une derive en lacet. C'est
+                    probablement le bon choix une fois l'IMU montee sur le
+                    robot, le cap venant alors du GPS et de l'odometrie.
+
+            config RETRIEVER_IMU_MODE_ARVR
+                bool "ARVR stabilized RV — 9 axes, corrections lissees"
+                help
+                    Comme le rotation vector, mais les corrections de cap sont
+                    etalees au lieu d'etre appliquees d'un coup. Un saut de cap
+                    est tres mal digere par un EKF.
+
+        endchoice
+
+        config RETRIEVER_IMU_ENABLE_MAG
+            bool "Publier aussi le magnetometre"
+            default y
+            help
+                Champ magnetique calibre a 10 Hz. Sert surtout a diagnostiquer :
+                une norme qui s'ecarte du champ terrestre local trahit une
+                perturbation, et c'est exactement ce qu'on veut mesurer avant de
+                decider si le cap magnetique est utilisable sur ce robot.
+
+    endmenu
+
+endmenu

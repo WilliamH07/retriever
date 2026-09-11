@@ -42,6 +42,7 @@ measurable exit criterion at every stage.
 |:-----:|----------------|-------|
 | 1 | Architecture and CAD design complete | done |
 | 2 | Chassis fabricated and assembled | **current** |
+| 2b | First sensor published to ROS 2 over a transport-agnostic link | **current** |
 | 3 | Power chain energised, no motor connected | next |
 | 4 | Motors driven, wheels raised, all stop tests pass | planned |
 | 5 | Autonomous outdoor navigation to a waypoint | planned |
@@ -151,6 +152,7 @@ French; an English summary is planned.
 | [05 Software](docs/architecture/05-reseau-code-tests-physique.md) | Network, code layout, test strategy |
 | [06 BOM](docs/architecture/06-bom-fmea-schema-plan.md) | Bill of materials, FMEA, build plan |
 | [07 Operator](docs/architecture/07-interface-operateur.md) | Operator console |
+| [13 Software](docs/architecture/13-architecture-logicielle-liaison.md) | Link layer, firmware, ROS 2 chain, IMU bench |
 
 Every claim in these documents carries a marker: verified against a datasheet,
 community consensus, to be measured, or an explicit assumption. Nothing gets

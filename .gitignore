@@ -22,11 +22,16 @@ venv/
 *.elf
 *.bin.tmp
 
-# PlatformIO / ESP-IDF
-.pio/
-.pioenvs/
-.piolibdeps/
+# ESP-IDF
+# sdkconfig est regenere a partir de sdkconfig.defaults, qui lui est versionne.
+sdkconfig
 sdkconfig.old
+managed_components/
+dependencies.lock
+firmware/*/build/
+
+# Tests hote
+firmware/test/build/
 
 # EasyEDA and PCB output
 *-backups/

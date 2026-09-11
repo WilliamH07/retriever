@@ -1,0 +1,74 @@
+# Intégration continue.
+#
+# Ce que la CI protège, concrètement : qu'un firmware et un calculateur qui ne
+# parlent pas le même protocole ne puissent pas arriver jusqu'à l'établi. C'est
+# le mode de défaillance le plus coûteux d'un système embarqué distribué, parce
+# qu'il ne produit pas d'erreur — il produit des valeurs plausibles et fausses.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  protocole:
+    name: Protocole et tests hôte
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install pyyaml
+
+      - name: Les fichiers générés correspondent au YAML
+        run: python3 firmware/protocol/generate.py --check
+
+      - name: Tests hôte du firmware
+        run: make -C firmware/test
+
+      - name: Accord entre les trois implémentations du protocole
+        run: python3 tools/check_protocol_sync.py
+
+  firmware:
+    name: Firmware ESP32
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Compilation ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5
+          target: esp32
+          path: firmware/esp32_safety
+
+  ros:
+    name: Workspace ROS 2 Jazzy
+    runs-on: ubuntu-latest
+    container: ros:jazzy-ros-base
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dépendances
+        shell: bash
+        run: |
+          apt-get update
+          rosdep update
+          rosdep install --from-paths ros2_ws/src --ignore-src -y || true
+
+      - name: Construction et tests
+        shell: bash
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          cd ros2_ws
+          colcon build --symlink-install
+          colcon test --event-handlers console_direct+
+          colcon test-result --verbose

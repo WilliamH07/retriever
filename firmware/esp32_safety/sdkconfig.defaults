@@ -1,0 +1,29 @@
+# Valeurs par défaut du projet. Ce fichier est versionné ; sdkconfig ne l'est
+# pas (il est régénéré). Toute valeur qui compte pour le comportement doit être
+# ici, pas seulement dans le sdkconfig local de la machine qui a compilé.
+
+CONFIG_IDF_TARGET="esp32"
+
+# ⚠️ Le point le plus important de ce fichier.
+# Par défaut, FreeRTOS bat à 100 Hz : pdMS_TO_TICKS(1) vaut alors un tick de
+# 10 ms, et toute tâche périodique plus rapide que 100 Hz devient impossible à
+# cadencer. À 1000 Hz, le tick vaut 1 ms, ce qui est ce dont la boucle de
+# contrôle à 200 Hz aura besoin — et ce dont la publication IMU à 100 Hz a
+# besoin dès maintenant.
+CONFIG_FREERTOS_HZ=1000
+
+# Une boucle de contrôle se compile pour la vitesse, pas pour la taille.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# Un dépassement de pile qui se manifeste par un comportement erratique coûte
+# des jours. Détecté, il coûte une minute.
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
+
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+
+# Bluetooth désactivé (§G.2) : consommation, bruit RF près des capteurs,
+# surface d'attaque, et blocages de plusieurs millisecondes dans la pile.
+CONFIG_BT_ENABLED=n
+
+# Le Wi-Fi n'est jamais initialisé par le firmware, pour les mêmes raisons.

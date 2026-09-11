@@ -1,0 +1,3 @@
+[submodule "firmware/components/retriever_imu/vendor/sh2"]
+	path = firmware/components/retriever_imu/vendor/sh2
+	url = https://github.com/ceva-dsp/sh2.git

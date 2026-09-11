@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>retriever_protocol</name>
+  <version>0.1.0</version>
+  <description>
+    Le protocole de liaison, généré depuis firmware/protocol/protocol.yaml.
+    Bibliothèque d'en-têtes seuls, sans dépendance ROS : le même fichier C est
+    compilé dans le firmware ESP32. C'est ce qui rend structurellement
+    impossible un désaccord de sérialisation entre le robot et le calculateur.
+
+    NE RIEN MODIFIER ICI À LA MAIN. Éditer le YAML, puis relancer
+    firmware/protocol/generate.py.
+  </description>
+  <maintainer email="wcontact33@gmail.com">William Hanczyk</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
