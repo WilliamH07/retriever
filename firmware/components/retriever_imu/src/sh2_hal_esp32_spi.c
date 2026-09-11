@@ -20,12 +20,20 @@
  *
  *    écriture  attendre H_INTN bas ──► CS bas ──► écrire ──► CS haut
  *
- *  ⚠️ L'écriture NE TOUCHE PAS à PS0/WAKE. La datasheet décrit bien PS0 comme
- *  un signal de réveil après le reset, mais le pilote de référence Adafruit —
- *  qui fonctionne — ne s'en sert jamais : il attend H_INTN et écrit. Le
- *  composant n'est pas mis en veille par ce firmware, il n'y a donc rien à
- *  réveiller. Tirer PS0 à la masse à chaque écriture ajoutait un aléa sans
- *  contrepartie, sur la broche qui sélectionne aussi le protocole.
+ *  ⚠️ L'ÉCRITURE COMMENCE PAR UN RÉVEIL. Après le reset, le concentrateur dort
+ *  (datasheet §5.2.2) : il n'assertera H_INTN que si l'hôte le lui demande, en
+ *  tirant H_WAKEN — la broche PS0, repurposée après le reset — à la masse.
+ *  Attendre H_INTN sans réveiller, c'est attendre une fenêtre qui ne s'ouvrira
+ *  que par hasard, quand le composant avait de lui-même quelque chose à dire.
+ *
+ *  Cette ligne a d'abord été retirée, à tort, parce que le pilote Adafruit ne
+ *  réveille jamais et fonctionne quand même. L'explication est venue après :
+ *  tant que le défaut MOSI ci-dessous était présent, le composant avait
+ *  toujours une erreur à signaler, donc H_INTN restait bas en permanence, donc
+ *  le réveil ne servait à rien — et son absence ne se voyait pas. Les deux
+ *  défauts se masquaient l'un l'autre. C'est pour ça que la trace vaut mieux
+ *  qu'un raisonnement : `ecriture : H_INTN jamais bas` n'est apparu qu'une
+ *  fois MOSI corrigé.
  *
  *  ⚠️⚠️ LE SPI EST FULL-DUPLEX, ET LE BNO08x LIT MOSI PENDANT NOS LECTURES.
  *  Il n'existe pas de « transaction de lecture » pour ce composant : chaque
@@ -313,22 +321,33 @@ static int hal_write(sh2_Hal_t *self, uint8_t *pBuffer, unsigned len)
         return 0;
     }
 
-    /* Le composant annonce par H_INTN qu'il est prêt à échanger. On attend, on
-     * écrit, et on ne touche à rien d'autre — surtout pas à PS0, qui est aussi
-     * la broche de sélection de protocole. */
-    if (!wait_intn(INTN_WAIT_MS)) {
-        s_counters.wake_timeouts++;
-        if (s_counters.wake_timeouts == 1u) {
-            ESP_LOGW(TAG, "ecriture : H_INTN jamais bas (compteur en diagnostic)");
-        }
-        return 0;
+    /* Réveil : H_WAKEN (PS0) à la masse, puis on attend que le composant
+     * confirme qu'il est réveillé en assertant H_INTN. Voir le bandeau.
+     *
+     * Le sémaphore est vidé AVANT de réveiller : une assertion antérieure,
+     * déjà consommée par une lecture, ferait croire à un réveil instantané et
+     * l'écriture partirait dans le vide. */
+    xSemaphoreTake(s_hal.intn, 0);
+    gpio_set_level((gpio_num_t)s_hal.pins.ps0, 0);
+
+    const bool ready = wait_intn(INTN_WAIT_MS);
+    int written = 0;
+    if (ready && spi_tx(pBuffer, len) == ESP_OK) {
+        written = (int)len;
+        s_counters.writes++;
     }
 
-    if (spi_tx(pBuffer, len) != ESP_OK) {
-        return 0;
+    /* H_WAKEN est relâché APRÈS le transfert : la datasheet demande de le
+     * maintenir bas pendant tout l'échange. */
+    gpio_set_level((gpio_num_t)s_hal.pins.ps0, 1);
+
+    if (!ready) {
+        s_counters.wake_timeouts++;
+        if (s_counters.wake_timeouts == 1u) {
+            ESP_LOGW(TAG, "reveil sans reponse : H_INTN reste haut apres PS0 bas — verifier le cablage de PS0");
+        }
     }
-    s_counters.writes++;
-    return (int)len;
+    return written;
 }
 
 static uint32_t hal_get_time_us(sh2_Hal_t *self)

@@ -44,7 +44,16 @@ class Monitor:
         self.args = args
         self.proto = Protocol()
         self.decoder = Decoder()
-        self.port = serial.Serial(args.device, args.baud, timeout=0.05)
+        # ⚠️ 5 ms, et surtout pas 50.
+        #
+        # `read(n)` de pyserial rend la main quand il a n octets OU quand le
+        # délai expire. En demandant 4096 octets avec un délai de 50 ms sur une
+        # liaison peu chargée, la boucle attendait systématiquement les 50 ms
+        # complètes — et un LINK_PONG arrivé juste après un retour attendait le
+        # tour suivant. La mesure d'aller-retour ne mesurait donc pas la
+        # liaison, elle mesurait ce délai : 53 ms, avec une dispersion de 2 ms,
+        # signature d'une constante et non d'un transport.
+        self.port = serial.Serial(args.device, args.baud, timeout=0.005)
 
         self.counts: dict[int, int] = defaultdict(int)
         self.recent: dict[int, deque[float]] = defaultdict(lambda: deque(maxlen=200))
@@ -229,7 +238,10 @@ class Monitor:
 
         try:
             while True:
-                data = self.port.read(4096)
+                # Tout ce qui est déjà arrivé, sinon un octet — qui borne
+                # l'attente au délai du port, soit 5 ms.
+                pending = self.port.in_waiting
+                data = self.port.read(pending if pending else 1)
                 if data:
                     if self.args.raw:
                         print(data.hex())
