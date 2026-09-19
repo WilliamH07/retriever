@@ -139,6 +139,10 @@ ros2_ws/src/
 
 ## Documentation
 
+**Start here:** [Démarrage](docs/DEMARRAGE.md) — what to install, how to flash
+the ESP32, how to build the ROS 2 workspace, and how to verify the IMU chain at
+every stage, with the traps that have already cost a day each. In French.
+
 The architecture dossier was written before construction began. It is in
 French; an English summary is planned.
 

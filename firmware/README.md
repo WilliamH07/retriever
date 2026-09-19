@@ -38,6 +38,9 @@ document is the full list.
 
 ## Build
 
+Full setup — toolchain, drivers, port, and how to check the result — is in
+[`docs/DEMARRAGE.md`](../docs/DEMARRAGE.md). The short version:
+
 ```bash
 git submodule update --init --recursive     # or tools/fetch_firmware_deps.sh
 cd firmware/esp32_safety
