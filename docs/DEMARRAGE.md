@@ -387,6 +387,10 @@ même version.
 
 ## 7. Pour aller plus loin
 
+- **L'état du banc, les défauts déjà trouvés et ce qu'il reste à faire** :
+  [`docs/HANDOFF-banc-imu.md`](HANDOFF-banc-imu.md). C'est le document à lire en
+  premier quand on reprend ce travail après une interruption.
+
 - L'architecture logicielle complète, la couche liaison et la recette de banc B1 :
   [`docs/architecture/13-architecture-logicielle-liaison.md`](architecture/13-architecture-logicielle-liaison.md)
 - Le portage SPI du BNO085, avec les trois pièges résolus expliqués en détail :

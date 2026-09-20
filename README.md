@@ -139,6 +139,10 @@ ros2_ws/src/
 
 ## Documentation
 
+**Where the work stands:** [HANDOFF — banc B1](docs/HANDOFF-banc-imu.md) —
+what runs today with measured numbers, the silent defects found and how each one
+worked, and what is left to do once the sensor is mounted. In French.
+
 **Start here:** [Démarrage](docs/DEMARRAGE.md) — what to install, how to flash
 the ESP32, how to build the ROS 2 workspace, and how to verify the IMU chain at
 every stage, with the traps that have already cost a day each. In French.
