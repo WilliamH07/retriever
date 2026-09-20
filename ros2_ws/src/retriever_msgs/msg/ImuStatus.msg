@@ -39,3 +39,15 @@ float32 rate_hz
 # Q14 du transport en laisse quelques 1e-4 ; au-delà de 1e-2, c'est une
 # corruption ou une erreur d'échelle.
 float32 quaternion_norm_error
+
+# Étalonnage dynamique du BNO085. Deux choses distinctes, et les confondre
+# coûte une séance de banc : `cal_enabled` dit que le capteur corrige ses biais
+# EN CE MOMENT, `cal_saves` dit que la correction a été écrite en flash et
+# survivra à la mise hors tension. Tant que cal_saves vaut 0, tout est en RAM.
+uint8 CAL_ACCEL = 1
+uint8 CAL_GYRO  = 2
+uint8 CAL_MAG   = 4
+uint8 cal_enabled          # masque CAL_* réellement accepté par le capteur
+uint8 cal_saves            # écritures DCD en flash depuis le démarrage du nœud
+bool cal_autosave          # sauvegarde automatique du DCD demandée au capteur
+int8 cal_last_result       # code de retour SH-2 de la dernière commande, 0 = succès

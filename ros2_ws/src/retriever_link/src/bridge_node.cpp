@@ -210,6 +210,7 @@ private:
       case protocol::kImuAccelId: on_accel(f); return;
       case protocol::kImuMagId: on_mag(f); return;
       case protocol::kImuStatusId: on_imu_status(f); return;
+      case protocol::kImuCalId: on_imu_cal(f); return;
       case protocol::kHeartbeatSafetyId: on_heartbeat(f); return;
       case protocol::kLinkPongId: on_pong(f); return;
       case protocol::kLogId: on_log(f); return;
@@ -334,6 +335,22 @@ private:
       to_magnetic_field_message(v->mx, v->my, v->mz, noise_, frame_id_, stamp_now()));
   }
 
+  void on_imu_cal(const protocol::Frame & f)
+  {
+    const auto v = protocol::unpack_imu_cal(f);
+    if (!v) {
+      return;
+    }
+    // ⚠️ C'est cette trame, et non IMU_MAG, qui fait autorité sur la qualité du
+    // magnétomètre : elle arrive même quand le magnétomètre est désactivé, et
+    // c'est précisément dans ce cas qu'on veut savoir pourquoi le cap est mauvais.
+    last_status_mag_.store(v->status_mag);
+    cal_enabled_.store(v->enabled);
+    cal_saves_.store(v->saves);
+    cal_autosave_.store((v->flags & 0x01U) != 0U);
+    cal_last_result_.store(v->last_result);
+  }
+
   void on_imu_status(const protocol::Frame & f)
   {
     const auto v = protocol::unpack_imu_status(f);
@@ -360,6 +377,10 @@ private:
     msg.samples_dropped_link = dropped_link_;
     msg.rate_hz = static_cast<float>(measured_rate_hz_.load());
     msg.quaternion_norm_error = static_cast<float>(last_norm_error_.load());
+    msg.cal_enabled = cal_enabled_.load();
+    msg.cal_saves = cal_saves_.load();
+    msg.cal_autosave = cal_autosave_.load();
+    msg.cal_last_result = cal_last_result_.load();
     imu_status_pub_->publish(msg);
   }
 
@@ -635,6 +656,9 @@ private:
     st.add("echantillons perdus (noeud)", dropped_node_.load());
     st.add("echantillons perdus (lien)", dropped_link_.load());
     st.add("ecart de norme du quaternion", norm_error);
+    st.add("etalonnage actif (masque)", static_cast<int>(cal_enabled_.load()));
+    st.add("sauvegardes du DCD", static_cast<int>(cal_saves_.load()));
+    st.add("sauvegarde auto du DCD", cal_autosave_.load());
 
     const std::int64_t imu_ns = last_imu_stamp_ns_.load(std::memory_order_relaxed);
     const double age =
@@ -654,6 +678,19 @@ private:
         "quaternion non unitaire — corruption ou erreur d'echelle");
     } else if (rate < expected_rate_hz_ * 0.8) {
       st.summary(diagnostic_msgs::msg::DiagnosticStatus::WARN, "cadence basse");
+    } else if (cal_enabled_.load() == 0U) {
+      // Sans étalonnage dynamique, le BNO085 sort ses valeurs d'usine : biais
+      // accéléromètre d'un demi m/s², et un cap dont le capteur annonce
+      // lui-même 180° d'incertitude. Ça ne ressemble pas à une panne dans les
+      // données, et c'est bien le problème.
+      st.summary(
+        diagnostic_msgs::msg::DiagnosticStatus::WARN,
+        "etalonnage dynamique inactif — les biais ne sont pas corriges");
+    } else if (cal_saves_.load() == 0U) {
+      st.summary(
+        diagnostic_msgs::msg::DiagnosticStatus::WARN,
+        "etalonnage non sauvegarde — il sera perdu a l'extinction "
+        "(tools/imu_cal.py --save)");
     } else if (last_status_rot_.load() < 2) {
       // Le §P4 du pipeline d'auto-test attend une orientation fiable ; une
       // qualité basse au démarrage est normale, elle doit monter après
@@ -735,6 +772,12 @@ private:
   std::atomic<double> round_trip_max_ms_{0.0};
   std::atomic<std::uint32_t> dropped_link_{0};
   std::atomic<std::uint64_t> unknown_frames_{0};
+
+  // Étalonnage, alimenté par IMU_CAL.
+  std::atomic<std::uint8_t> cal_enabled_{0};
+  std::atomic<std::uint8_t> cal_saves_{0};
+  std::atomic<bool> cal_autosave_{false};
+  std::atomic<std::int8_t> cal_last_result_{0};
   std::atomic<std::uint32_t> dropped_node_{0};
   std::atomic<std::uint32_t> sensor_resets_{0};
   std::atomic<std::uint32_t> node_hash_{0};
