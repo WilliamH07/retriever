@@ -30,7 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from retriever_wire import Decoder, Protocol  # noqa: E402
+from retriever_wire import Decoder, Protocol, open_port  # noqa: E402
 
 try:
     import serial
@@ -51,9 +51,11 @@ class Monitor:
         # liaison peu chargée, la boucle attendait systématiquement les 50 ms
         # complètes — et un LINK_PONG arrivé juste après un retour attendait le
         # tour suivant. La mesure d'aller-retour ne mesurait donc pas la
-        # liaison, elle mesurait ce délai : 53 ms, avec une dispersion de 2 ms,
-        # signature d'une constante et non d'un transport.
-        self.port = serial.Serial(args.device, args.baud, timeout=0.005)
+        # liaison, elle mesurait ce délai.
+        #
+        # open_port() plutôt que serial.Serial() : voir sa docstring — il ne
+        # faut pas que l'ouverture du port redémarre la carte.
+        self.port = open_port(args.device, args.baud)
 
         self.counts: dict[int, int] = defaultdict(int)
         self.recent: dict[int, deque[float]] = defaultdict(lambda: deque(maxlen=200))

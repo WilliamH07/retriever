@@ -263,3 +263,36 @@ class Decoder:
         frame_id = body[0] | ((body[1] & 0x07) << 8)
         self.stats.frames_ok += 1
         return frame_id, body[2:]
+
+
+def open_port(device: str, baud: int, timeout: float = 0.005):
+    """Ouvre le port série SANS redémarrer l'ESP32.
+
+    ⚠️ Sur une DevKitC, DTR et RTS pilotent EN (reset) et IO0 (mode de
+    démarrage) à travers le circuit d'auto-reset. pyserial les assertit à
+    l'ouverture : la carte redémarre, et selon l'ordre des transitions elle peut
+    rester dans le bootloader ROM — muette, sans la moindre erreur côté hôte.
+    Symptôme observé au banc : la liaison marche après un rebranchement
+    physique, puis plus rien dès qu'un second programme rouvre le port.
+
+    `exclusive` est là pour une raison voisine : deux programmes lisant le même
+    port se partagent les octets, et chacun voit un flux tronqué qu'il signale
+    comme des erreurs de format. Mieux vaut un refus net.
+
+    Importer pyserial ici et non en tête de module : les outils qui ne touchent
+    pas au port (le générateur, les tests) n'ont pas à en dépendre.
+    """
+    import serial   # noqa: PLC0415
+
+    port = serial.Serial()
+    port.port = device
+    port.baudrate = baud
+    port.timeout = timeout
+    port.dtr = False
+    port.rts = False
+    try:
+        port.exclusive = True
+    except (AttributeError, ValueError):
+        pass        # plateformes sans verrou exclusif
+    port.open()
+    return port

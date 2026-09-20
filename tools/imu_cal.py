@@ -42,7 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from retriever_wire import Decoder, Protocol  # noqa: E402
+from retriever_wire import Decoder, Protocol, open_port  # noqa: E402
 
 try:
     import serial
@@ -147,7 +147,7 @@ def main() -> int:
         if nom in args.sensors:
             mask |= bit
 
-    port = serial.Serial(args.device, args.baud, timeout=0.005)
+    port = open_port(args.device, args.baud)
     if action is not None:
         port.write(proto.encode_named("IMU_CAL_CMD", action=action,
                                       sensors=mask, magic=MAGIC))

@@ -5,7 +5,10 @@
 
 #include "retriever_link/serial_transport.hpp"
 
+#include "rclcpp/rclcpp.hpp"
+
 #include <fcntl.h>
+#include <sys/ioctl.h>
 #include <poll.h>
 #include <termios.h>
 #include <unistd.h>
@@ -83,6 +86,16 @@ void SerialTransport::open()
   tio.c_cflag &= ~PARENB;      // pas de parité
   tio.c_cflag &= ~CRTSCTS;     // pas de contrôle de flux matériel
 
+  // ⚠️ HUPCL fait abaisser DTR et RTS à la fermeture du port. Sur une DevKitC
+  // ESP32, ces deux lignes ne sont pas décoratives : elles pilotent EN (reset)
+  // et IO0 (mode démarrage) à travers le circuit d'auto-reset du montage. Les
+  // laisser au noyau, c'est redémarrer la carte à chaque ouverture et, selon
+  // l'ordre des transitions, la laisser dans le bootloader ROM — muette, sans
+  // la moindre erreur côté hôte. Symptôme observé le 20 septembre 2026 : la
+  // liaison marchait après un rebranchement physique, puis plus rien dès qu'un
+  // second programme rouvrait le port.
+  tio.c_cflag &= ~HUPCL;
+
   // Lecture non bloquante : l'attente se fait dans poll(), ce qui permet
   // d'annuler proprement à l'arrêt du nœud.
   tio.c_cc[VMIN] = 0;
@@ -92,6 +105,21 @@ void SerialTransport::open()
     const std::string why = std::strerror(errno);
     close();
     throw std::runtime_error("tcsetattr : " + why);
+  }
+
+  // Et on désassertit explicitement les deux lignes : avec DTR et RTS au repos,
+  // les deux transistors du circuit d'auto-reset sont bloqués, EN et IO0
+  // remontent, et la carte tourne normalement. C'est ce que fait esptool quand
+  // on lui demande de ne pas redémarrer la cible.
+  int modem_bits = TIOCM_DTR | TIOCM_RTS;
+  if (::ioctl(fd_, TIOCMBIC, &modem_bits) != 0) {
+    // Certains pilotes ne l'implémentent pas. Ce n'est pas fatal : on le dit et
+    // on continue, plutôt que de refuser d'ouvrir un port qui marche peut-être.
+    RCLCPP_WARN(
+      rclcpp::get_logger("retriever_link"),
+      "impossible de relacher DTR/RTS sur %s (%s) — si la carte ne parle pas, "
+      "c'est la premiere chose a regarder",
+      device_.c_str(), std::strerror(errno));
   }
 
   // ⚠️ Sans cette purge, les octets accumulés pendant que le nœud était arrêté
