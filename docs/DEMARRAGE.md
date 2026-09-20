@@ -374,6 +374,8 @@ même version.
 | Port occupé, `Resource busy` | le moniteur ou un autre `idf.py monitor` tient déjà le port |
 | `Permission denied` sur `/dev/ttyUSB0` | pas dans le groupe `dialout`, ou session pas rouverte depuis |
 | Rien ne vient dans le moniteur | mauvais port, ou débit — le firmware est à 921600 |
+| La liaison marche après un rebranchement physique, puis plus rien à chaque relance | La carte est partie dans le **bootloader ROM**. Sur une DevKitC, `DTR` et `RTS` pilotent `IO0` et `EN` par le circuit d'auto-reset ; ouvrir un port les fait bouger, et selon l'ordre des transitions la carte démarre en mode téléchargement. Elle y attend un téléversement **à 115200** et reste donc muette pour un hôte qui lit à 921600 — sans qu'aucune erreur ne soit levée nulle part. Corrigé depuis `5e9049b` : le nœud et les outils Python remettent la carte en mode exécution à l'ouverture. Si ça revient, vérifier `serial.reset_on_open` |
+| « aucune trame reçue » qui devient « taux d'erreur supérieur à 1 % » | Même cause que ci-dessus : des octets arrivent, mais émis à 115200 par les chargeurs pendant qu'on lit à 921600. Le silence complet et le bruit illisible sont deux états différents du même problème |
 | Beaucoup d'erreurs « format » les premières secondes | normal : le bootloader ESP32 écrit son journal en clair à 115200 avant que la liaison ne prenne la main. Regarder « erreurs sur les 10 dernières secondes », pas le total |
 | `pas de H_INTN apres reset` | PS0/PS1 pas hauts au reset, ou `INT` / `RST` mal câblés |
 | `reveil sans reponse` | PS0 pas relié à GPIO26, ou câblé en dur au 3V3 |
