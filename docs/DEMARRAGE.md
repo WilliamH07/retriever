@@ -460,7 +460,10 @@ essayer au hasard fait perdre plus de temps que de les parcourir dans l'ordre.
 
 | Symptôme | Cause la plus fréquente |
 |---|---|
-| Le moteur ne tourne pas du tout | `support_motor_dtr: true` est requis sur le X4 — c'est DTR qui commande le moteur sur la carte adaptatrice |
+| Le nœud démarre, `Successed to start the lidar`, puis `Timeout count` en boucle sans un seul `Checksum error` | Le SDK ne reçoit **aucun** octet. Vérifier d'abord `isSingleChannel: true` et `intensity_bit: 10` — sans le second, le SDK ne sonde pas la largeur d'intensité et ne resynchronise jamais le flux. Puis `sample_rate: 5` : le pilote ROS met 9 par défaut |
+| `Checksum error` en rafale au démarrage, puis `The intensity has been automatically adjusted to [16] / [8] / [0] bit` | **Normal.** C'est le sondage, il aboutit à 0 pour le X4. Ne pas y toucher |
+| `Fail to get baseplate device information` au démarrage | **Normal** en mono-canal. Le X4 du banc ne délivre ses scans qu'ainsi, voir l'en-tête de `lidar_bench.yaml` |
+| Rien ne marche, et on ne sait plus quel paramètre a changé | Lancer `~/YDLidar-SDK/build/tri_test`, port `/dev/ydlidar`, 128000, mono-canal `yes`. S'il reçoit des scans, le capteur va bien et c'est la configuration ROS qu'il faut ramener **à l'identique** de la sienne, puis écarter un paramètre à la fois |
 | Le moteur démarre puis cale, scans tronqués | Courant insuffisant. Alimenter `USB_PWR` en 5 V séparément ⚠️ |
 | Le nœud démarre, aucun `/scan` | Mauvaise variante : ces paramètres sont ceux du **X4**, le X4 Pro est mono-canal (`isSingleChannel: true`) et n'utilise pas DTR |
 | `/scan` publie mais tout est à `inf` | Objectif obstrué, ou lumière trop forte — voir l'avertissement en tête de section |

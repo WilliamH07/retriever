@@ -1,72 +1,87 @@
 # Paramètres du YDLIDAR X4 — banc.
 #
-# ⚠️ Ces valeurs sont celles du **X4 classique**, et elles ne conviennent pas au
-# X4 Pro, qui est mono-canal et dont le moteur n'est pas piloté par DTR. Se
-# tromper de variante donne un lidar qui tourne sans jamais publier de scan.
+# ⚠️ Ce fichier a été établi PAR LA MESURE, pas d'après la documentation, et les
+# deux ne sont pas d'accord. La table par modèle du constructeur donne pour le
+# X4 un capteur double canal (`isSingleChannel: false`). L'exemplaire du banc
+# — série 2021090300040777, firmware 1.10, code modèle 6 — répond au dialogue
+# de configuration comme un double canal (il livre ses informations produit)
+# mais ne délivre ses SCANS qu'en mono-canal. Avec false : « Operation timed
+# out » à l'infini. Avec true : les scans arrivent.
 #
-# Source : table par modèle du pilote officiel ✅ —
-#   X4 | 128000 bauds | échantillonnage 5 kHz | 0,12–10 m | 5–12 Hz (PWM)
-#       | isSingleChannel false | intensity false
+# Méthode qui a fini par marcher, après une après-midi d'hypothèses : reproduire
+# à l'identique `tri_test`, le programme d'exemple du SDK qui fonctionnait, puis
+# s'en écarter un paramètre à la fois. Chaque valeur ci-dessous porte sa
+# provenance :
+#   ✅ prouvée au banc, dans la configuration qui marche
+#   📐 écart volontaire par rapport à cette configuration, inoffensif par nature
+#   🔴 à trancher par une mesure physique — voir docs/DEMARRAGE.md §4 ter
 #
 # ⚠️ La clé de premier niveau DOIT être le nom du nœud tel qu'il est lancé.
-# Le fichier de lancement force `name="ydlidar_ros2_driver_node"` pour cette
-# raison : un nœud renommé ne lit plus ses paramètres, et il démarre quand même,
-# avec les valeurs par défaut — c'est-à-dire un autre modèle de lidar.
+# Un nœud renommé lit ses valeurs par défaut — celles d'un AUTRE modèle de
+# lidar — et démarre quand même. Le fichier de lancement force le nom.
 
 ydlidar_ros2_driver_node:
   ros__parameters:
 
-    # /dev/ydlidar est l'alias créé par la règle udev du pilote. Un nom stable
-    # est indispensable dès qu'un deuxième périphérique série existe — et
-    # l'ESP32 en est déjà un.
-    port: /dev/ydlidar
-    baudrate: 128000              # ✅ X4
+    port: /dev/ydlidar            # alias udev ; sans lui, ttyUSB0 ou 1 selon l'ordre de branchement
+    baudrate: 128000              # ✅
+    frame_id: laser               # ✅ §03 du dossier
 
-    # ✅ §03 du dossier : le repère du lidar s'appelle `laser`.
-    frame_id: laser
+    lidar_type: 1                 # ✅ TYPE_TRIANGLE
+    device_type: 0                # ✅ YDLIDAR_TYPE_SERIAL
 
-    lidar_type: 1                 # TYPE_TRIANGLE ✅
-    device_type: 0                # YDLIDAR_TYPE_SERIAL ✅
-    sample_rate: 5                # 5 kHz ✅ X4
-    isSingleChannel: false        # ✅ X4 (le X4 Pro, lui, est mono-canal)
-    intensity: false              # ✅ X4 ne fournit pas d'intensité
-    intensity_bit: 0
+    # ✅ true — contraire à la documentation, voir l'en-tête. Conséquence à
+    # connaître : le journal affiche « Fail to get baseplate device information »
+    # au démarrage. Ce n'est PAS une panne, c'est le prix du mono-canal.
+    isSingleChannel: true
 
-    # ⚠️ Le moteur du X4 est piloté par DTR sur la carte adaptatrice. À false,
-    # le moteur ne démarre pas — et le nœud ne signale rien d'autre qu'une
-    # absence de données.
+    # ✅ true. ⚠️ Une version précédente de ce fichier affirmait false comme un
+    # fait établi : le moteur ne démarrait pas avec true. Mais à ce moment-là
+    # isSingleChannel était encore à false, les deux avaient changé ensemble,
+    # et le résultat avait été attribué au mauvais paramètre. C'est exactement
+    # l'erreur que la règle « un paramètre à la fois » existe pour éviter.
     support_motor_dtr: true
 
-    # 7 Hz plutôt que 10. Deux raisons : c'est la valeur retenue au §03 du
-    # dossier, et la fréquence est obtenue en pilotant le moteur, donc en
-    # consommant. Tant que le port `USB_PWR` n'a pas son alimentation 5 V
-    # dédiée (§01 ⚠️), inutile de demander au port USB du PC plus que le
-    # nécessaire.
-    frequency: 7.0
+    # ✅ intensity_bit à 10 n'est pas une largeur : c'est « je ne sais pas,
+    # cherche ». C'est ce qui déclenche le sondage 16 → 8 → 0 visible au
+    # démarrage, avec ses erreurs de somme de contrôle — elles sont NORMALES,
+    # c'est le SDK qui essaie les largeurs une à une. À 0, il ne cherche pas,
+    # ne resynchronise jamais le flux, et attend des trames qui n'arrivent
+    # jamais. Le X4 ne fournit pas d'intensité : le sondage aboutit à 0.
+    intensity: false
+    intensity_bit: 10
+
+    sample_rate: 5                # ✅ 5 kHz — le pilote ROS met 9 par défaut, ce qui casse tout
+
+    # ✅ 5,0 est la valeur de la configuration qui marche. Elle est NOMINALE : en
+    # mono-canal le moteur n'est pas asservi, il tourne à sa vitesse libre —
+    # 670 points à 5 kHz, soit ~7,5 Hz, mesuré — et le pilote calcule la durée
+    # réelle de chaque tour d'après ses horodatages, pas d'après ce nombre.
+    frequency: 5.0
+
+    fixed_resolution: false       # ✅ — le nombre de points par tour varie de quelques unités
+    abnormal_check_count: 4       # ✅
+    auto_reconnect: true          # ✅
+
+    # 🔴 false / false est la configuration qui marche, mais ces deux-là ne
+    # changent rien à l'acquisition : ils retournent ou miroitent le scan. Ils
+    # ne se vérifient PAS sur le papier — un objet à 1 m droit devant, et on
+    # regarde où il apparaît. Une erreur ici donne une carte plausible et un
+    # robot qui tourne du mauvais côté. Procédure dans DEMARRAGE.md §4 ter.
+    reversion: false
+    inverted: false
 
     angle_min: -180.0
     angle_max: 180.0
-    range_min: 0.12               # ✅ X4
-    range_max: 10.0               # ✅ X4 — et non 12, qui est la valeur du Pro
+    # 📐 La configuration qui marche disait 0,05 et 64 — les valeurs génériques
+    # de tri_test. Celles-ci sont la fiche technique du X4. Elles ne font que
+    # borner les mesures publiées : elles ne peuvent pas empêcher l'acquisition.
+    range_min: 0.12
+    range_max: 10.0
 
-    # ⚠️ Ces deux-là sont EXACTEMENT ce qui retourne ou miroite le scan. Ils ne
-    # se vérifient pas sur le papier : il faut poser un objet dans une direction
-    # connue et regarder où il apparaît. Procédure dans docs/DEMARRAGE.md §4 ter.
-    reversion: false
-    inverted: true
-
-    fixed_resolution: true
-    auto_reconnect: true
-    abnormal_check_count: 4
-
-    # ✅ REP-117 : une mesure hors portée se dit `+inf`, pas `0.0`. À false, le
-    # pilote sort des zéros, qui sont sous `range_min` — chaque consommateur
-    # doit alors les filtrer lui-même, et celui qui oublie voit un obstacle
-    # collé au capteur. Même raisonnement que les covariances à -1 du §AF.5.
+    # ✅ REP-117 : une mesure hors portée se dit +inf, pas 0.0. Réglage côté
+    # ROS uniquement, le SDK ne le voit pas.
     invalid_range_is_inf: true
 
-    # Secteurs à ignorer, en degrés : "min,max,min,max,…". Vide au banc ; à
-    # remplir une fois le lidar monté, pour masquer ce qu'il voit du châssis.
-    ignore_array: ""
-
+    ignore_array: ""              # secteurs masqués une fois monté sur le châssis
     debug: false
