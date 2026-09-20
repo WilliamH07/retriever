@@ -38,6 +38,7 @@ static const char *TAG = "imu";
 static QueueHandle_t s_queue;
 static rt_imu_config_t s_cfg;
 static uint32_t s_resets;
+static bool s_running;   /* faux pendant rt_imu_init() — voir on_event() */
 static uint32_t s_dropped;
 static uint8_t s_seq;
 
@@ -73,13 +74,28 @@ static const char *mode_name(rt_imu_mode_t mode)
 static void on_event(void *cookie, sh2_AsyncEvent_t *event)
 {
     (void)cookie;
-    if (event->eventId == SH2_RESET) {
-        /* ⚠️ Un reset spontané du capteur perd toute la configuration des
-         * rapports. Le détecter et le RECOMPTER est ce qui distingue une IMU
-         * qui s'est tue d'une IMU qu'on croit vivante. */
-        s_resets++;
-        ESP_LOGW(TAG, "reset du capteur (%u depuis le demarrage)", (unsigned)s_resets);
+    if (event->eventId != SH2_RESET) {
+        return;
     }
+
+    /* ⚠️ Un reset spontané du capteur perd toute la configuration des rapports.
+     * Le détecter et le RECOMPTER est ce qui distingue une IMU qui s'est tue
+     * d'une IMU qu'on croit vivante.
+     *
+     * MAIS le tout premier reset n'est pas un incident : c'est le BNO085 qui
+     * annonce la fin de son initialisation, et il arrive forcément, à chaque
+     * démarrage. Le compter donnerait un compteur à 1 en permanence — et le
+     * diagnostic ROS, qui passe en ERREUR dès qu'un reset est signalé, mettrait
+     * l'IMU au rouge dès le boot. Un voyant toujours rouge ne dit plus rien ;
+     * c'est pire que pas de voyant. `s_running` distingue donc la séquence de
+     * démarrage du fonctionnement normal. */
+    if (!s_running) {
+        ESP_LOGI(TAG, "reset d'initialisation du capteur (attendu)");
+        return;
+    }
+
+    s_resets++;
+    ESP_LOGW(TAG, "reset du capteur (%u depuis le demarrage)", (unsigned)s_resets);
 }
 
 static uint64_t rt_imu_now_us(void)
@@ -482,7 +498,12 @@ esp_err_t rt_imu_init(const rt_imu_config_t *cfg)
     ESP_LOGI(TAG, "%s a %d Hz%s", mode_name(s_cfg.mode), s_cfg.rate_hz,
              s_cfg.enable_mag ? ", magnetometre a 10 Hz" : "");
 
+    /* À partir d'ici seulement, un reset est un incident. */
+    s_resets = 0u;
+    s_running = true;
+
     if (xTaskCreate(imu_task, "imu", IMU_TASK_STACK, NULL, IMU_TASK_PRIO, NULL) != pdPASS) {
+        s_running = false;
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
