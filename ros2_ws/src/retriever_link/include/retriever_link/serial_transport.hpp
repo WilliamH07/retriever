@@ -24,7 +24,24 @@ namespace retriever::link
 class SerialTransport : public Transport
 {
 public:
-  SerialTransport(std::string device, int baudrate);
+  /**
+   * @param reset_on_open  Remet la carte en mode EXÉCUTION à l'ouverture du
+   *   port, par une impulsion sur EN avec IO0 maintenu haut.
+   *
+   *   ⚠️ Indispensable sur une DevKitC. Les lignes DTR et RTS pilotent IO0 et
+   *   EN à travers le circuit d'auto-reset ; l'ouverture d'un port les fait
+   *   bouger, et selon l'ordre des transitions la carte démarre en mode
+   *   TÉLÉCHARGEMENT. Elle attend alors un téléversement, à 115200, et reste
+   *   donc muette pour un hôte qui lit à 921600 — sans qu'aucune erreur ne
+   *   soit levée nulle part. Observé au banc le 20 septembre 2026 : la liaison
+   *   marchait après un rebranchement physique, puis plus rien à chaque
+   *   relance du nœud.
+   *
+   *   À passer à false le jour où ce transport servira à autre chose qu'un
+   *   banc : redémarrer un nœud de sécurité parce que le calculateur ouvre un
+   *   port est une mauvaise idée sur un robot. Sur CAN la question disparaît.
+   */
+  SerialTransport(std::string device, int baudrate, bool reset_on_open = true);
   ~SerialTransport() override;
 
   void open() override;
@@ -39,6 +56,7 @@ private:
 
   std::string device_;
   int baudrate_;
+  bool reset_on_open_;
   int fd_ = -1;
 
   rt_frame_decoder_t decoder_{};

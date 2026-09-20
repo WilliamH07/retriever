@@ -14,10 +14,12 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace retriever::link
 {
@@ -42,8 +44,8 @@ speed_t to_speed(int baud)
 
 }  // namespace
 
-SerialTransport::SerialTransport(std::string device, int baudrate)
-: device_(std::move(device)), baudrate_(baudrate)
+SerialTransport::SerialTransport(std::string device, int baudrate, bool reset_on_open)
+: device_(std::move(device)), baudrate_(baudrate), reset_on_open_(reset_on_open)
 {
   rt_frame_decoder_init(&decoder_);
 }
@@ -120,6 +122,34 @@ void SerialTransport::open()
       "impossible de relacher DTR/RTS sur %s (%s) — si la carte ne parle pas, "
       "c'est la premiere chose a regarder",
       device_.c_str(), std::strerror(errno));
+  }
+
+  // --- Remise en mode EXÉCUTION -----------------------------------------
+  //
+  // Relâcher DTR et RTS ne suffit pas : si la carte est déjà partie dans le
+  // bootloader ROM, elle y reste jusqu'à une coupure d'alimentation. Elle y
+  // attend un téléversement, à 115200, et reste donc muette pour nous — sans
+  // qu'aucune erreur ne soit levée nulle part. C'est la sequence d'esptool, à
+  // l'envers du mode téléchargement : IO0 HAUT pendant que EN remonte.
+  //
+  // Ordre imposé par le matériel, et se tromper le fait basculer dans l'autre
+  // mode :
+  //     IO0 haut  (DTR relâché)   →  « démarre l'application »
+  //     EN  bas   (RTS asserté)   →  reset
+  //     EN  haut  (RTS relâché)   →  démarrage
+  if (reset_on_open_) {
+    int dtr = TIOCM_DTR;
+    int rts = TIOCM_RTS;
+    ::ioctl(fd_, TIOCMBIC, &dtr);     // IO0 haut : surtout pas le bootloader
+    ::ioctl(fd_, TIOCMBIS, &rts);     // EN bas
+    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+    ::ioctl(fd_, TIOCMBIC, &rts);     // EN haut : la carte démarre
+
+    // Le temps que le chargeur ROM et celui d'ESP-IDF finissent de parler. Ce
+    // qu'ils émettent sort en clair à 115200 et ressemble à du bruit quand on
+    // lit à 921600 : la purge juste en dessous s'en débarrasse, ce qui évite
+    // une bordée d'erreurs de cadrage à chaque démarrage du nœud.
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
   }
 
   // ⚠️ Sans cette purge, les octets accumulés pendant que le nœud était arrêté

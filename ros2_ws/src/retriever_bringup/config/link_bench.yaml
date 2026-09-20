@@ -12,6 +12,12 @@
     serial:
       device: "/dev/ttyUSB0"
       baudrate: 921600
+      # ⚠️ Remet l'ESP32 en mode exécution à l'ouverture du port. Sur une
+      # DevKitC, DTR et RTS pilotent IO0 et EN par le circuit d'auto-reset :
+      # sans cette remise à zéro explicite, la carte peut démarrer en mode
+      # téléchargement, où elle attend un téléversement à 115200 et reste
+      # muette pour un hôte qui lit à 921600 — sans erreur nulle part.
+      reset_on_open: true
 
     can:
       interface: "can0"

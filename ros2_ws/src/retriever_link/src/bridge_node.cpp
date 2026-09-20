@@ -97,6 +97,12 @@ private:
     transport_kind_ = declare_parameter<std::string>("transport", "serial");
     serial_device_ = declare_parameter<std::string>("serial.device", "/dev/ttyUSB0");
     serial_baud_ = declare_parameter<int>("serial.baudrate", 921600);
+    // Voir SerialTransport : sur une DevKitC, ouvrir le port peut faire
+    // démarrer la carte en mode téléchargement, où elle est muette. Le nœud la
+    // remet donc en mode exécution à l'ouverture. À passer à false sur un
+    // montage où redémarrer le microcontrôleur au démarrage du nœud n'est pas
+    // acceptable — sur CAN, la question ne se pose pas.
+    serial_reset_on_open_ = declare_parameter<bool>("serial.reset_on_open", true);
     can_interface_ = declare_parameter<std::string>("can.interface", "can0");
 
     frame_id_ = declare_parameter<std::string>("frame_id", "imu_link");
@@ -141,7 +147,8 @@ private:
     if (transport_kind_ == "socketcan") {
       transport_ = std::make_unique<SocketCanTransport>(can_interface_);
     } else {
-      transport_ = std::make_unique<SerialTransport>(serial_device_, serial_baud_);
+      transport_ = std::make_unique<SerialTransport>(
+        serial_device_, serial_baud_, serial_reset_on_open_);
     }
     transport_->open();
   }
@@ -725,6 +732,7 @@ private:
   std::string transport_kind_;
   std::string serial_device_;
   int serial_baud_ = 921600;
+  bool serial_reset_on_open_{true};
   std::string can_interface_;
   std::string frame_id_;
   double latency_offset_ms_ = 1.5;

@@ -15,6 +15,7 @@ Copyright (c) 2026 William Hanczyk — Apache License 2.0
 from __future__ import annotations
 
 import struct
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -265,7 +266,7 @@ class Decoder:
         return frame_id, body[2:]
 
 
-def open_port(device: str, baud: int, timeout: float = 0.005):
+def open_port(device: str, baud: int, timeout: float = 0.005, reset: bool = True):
     """Ouvre le port série SANS redémarrer l'ESP32.
 
     ⚠️ Sur une DevKitC, DTR et RTS pilotent EN (reset) et IO0 (mode de
@@ -295,4 +296,23 @@ def open_port(device: str, baud: int, timeout: float = 0.005):
     except (AttributeError, ValueError):
         pass        # plateformes sans verrou exclusif
     port.open()
+
+    if reset:
+        # Remise en mode EXÉCUTION. Relâcher DTR et RTS ne suffit pas : une
+        # carte déjà partie dans le bootloader ROM y reste jusqu'à une coupure
+        # d'alimentation, où elle attend un téléversement à 115200 — muette
+        # pour nous. L'ordre est imposé par le matériel :
+        #     IO0 haut (DTR relâché) → « démarre l'application »
+        #     EN bas   (RTS asserté) → reset
+        #     EN haut  (RTS relâché) → démarrage
+        port.dtr = False
+        port.rts = True
+        time.sleep(0.12)
+        port.reset_input_buffer()
+        port.rts = False
+        # Le temps que les deux chargeurs finissent de parler en clair à
+        # 115200 ; ce qu'ils émettent ressemble à du bruit à 921600.
+        time.sleep(0.4)
+        port.reset_input_buffer()
+
     return port
