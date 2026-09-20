@@ -125,6 +125,28 @@ esp_err_t rt_imu_read(rt_imu_sample_t *out, TickType_t wait);
  *  d'incertitude, faute de magnétomètre jamais étalonné.
  * ----------------------------------------------------------------------- */
 
+/**
+ * Actions d'étalonnage.
+ *
+ * ⚠️ Ces valeurs DOIVENT correspondre à l'énumération `imu_cal_action` du
+ * protocole. Elles sont pourtant redéfinies ici, et ce n'est pas un oubli : ce
+ * composant ne connaît pas le protocole — il ne dépend que de `driver` et
+ * `esp_timer`, et c'est `main.c` qui traduit entre les deux. Lui faire inclure
+ * l'en-tête généré ferait du pilote de capteur un client du bus, ce qui est
+ * exactement l'inverse de l'architecture.
+ *
+ * L'accord des deux énumérations n'est pas laissé à la vigilance : `main.c`,
+ * qui voit les deux en-têtes, le vérifie par _Static_assert. Une divergence
+ * casse la compilation au lieu de passer inaperçue.
+ */
+typedef enum {
+    RT_IMU_CAL_NONE = 0,
+    RT_IMU_CAL_ENABLE = 1,
+    RT_IMU_CAL_DISABLE = 2,
+    RT_IMU_CAL_SAVE = 3,
+    RT_IMU_CAL_CLEAR = 4,
+} rt_imu_cal_action_t;
+
 #define RT_IMU_CAL_SENSOR_ACCEL 0x01u
 #define RT_IMU_CAL_SENSOR_GYRO  0x02u
 #define RT_IMU_CAL_SENSOR_MAG   0x04u

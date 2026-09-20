@@ -188,6 +188,15 @@ static void publish_status(const rt_imu_sample_t *last)
     send_or_count(&f);
 }
 
+/* Le pilote d'IMU et le protocole definissent la meme enumeration chacun de
+ * leur cote, pour rester independants. C'est ici, le seul endroit qui voit les
+ * deux, qu'on verifie qu'ils disent la meme chose. */
+_Static_assert((int)RT_IMU_CAL_ACTION_NONE == (int)RT_IMU_CAL_NONE, "imu_cal_action a divergé");
+_Static_assert((int)RT_IMU_CAL_ACTION_ENABLE == (int)RT_IMU_CAL_ENABLE, "imu_cal_action a divergé");
+_Static_assert((int)RT_IMU_CAL_ACTION_DISABLE == (int)RT_IMU_CAL_DISABLE, "imu_cal_action a divergé");
+_Static_assert((int)RT_IMU_CAL_ACTION_SAVE == (int)RT_IMU_CAL_SAVE, "imu_cal_action a divergé");
+_Static_assert((int)RT_IMU_CAL_ACTION_CLEAR == (int)RT_IMU_CAL_CLEAR, "imu_cal_action a divergé");
+
 static void publish_cal(void)
 {
     rt_imu_cal_state_t c;

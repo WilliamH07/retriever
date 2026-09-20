@@ -318,23 +318,23 @@ static void cal_install_defaults(void)
 static void cal_service(void)
 {
     const uint8_t action = s_cal_req_action;
-    if (action == (uint8_t)RT_IMU_CAL_ACTION_NONE) {
+    if (action == (uint8_t)RT_IMU_CAL_NONE) {
         return;
     }
     const uint8_t sensors = s_cal_req_sensors;
-    s_cal_req_action = (uint8_t)RT_IMU_CAL_ACTION_NONE;
+    s_cal_req_action = (uint8_t)RT_IMU_CAL_NONE;
     s_cal_last_action = action;
 
     switch (action) {
-    case RT_IMU_CAL_ACTION_ENABLE:
+    case RT_IMU_CAL_ENABLE:
         cal_apply(sensors);
         break;
 
-    case RT_IMU_CAL_ACTION_DISABLE:
+    case RT_IMU_CAL_DISABLE:
         cal_apply(0u);
         break;
 
-    case RT_IMU_CAL_ACTION_SAVE: {
+    case RT_IMU_CAL_SAVE: {
         /* saveDcdNow et NON saveDcdAndReset : le second redémarre le capteur,
          * ce qui coupe le flux pendant une demi-seconde et fait repartir les
          * rapports de zéro. On ne veut pas payer ça pour une sauvegarde. */
@@ -346,7 +346,7 @@ static void cal_service(void)
         break;
     }
 
-    case RT_IMU_CAL_ACTION_CLEAR: {
+    case RT_IMU_CAL_CLEAR: {
         /* Irréversible, et le capteur redémarre : la boucle de service voit le
          * reset et reconfigure tout, étalonnage compris. */
         const int rc = sh2_clearDcdAndReset();
