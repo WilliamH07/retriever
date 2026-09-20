@@ -267,6 +267,12 @@ ros2 topic echo /retriever/imu_status --once
 
 Puis Foxglove Studio → *Open connection* → `ws://<adresse-du-calculateur>:8765`.
 
+Plutôt que de reconstruire les panneaux à la main : menu des mises en page →
+**Import from file…** → [`docs/foxglove/bench_imu.json`](foxglove/bench_imu.json).
+Une mise en page Foxglove vit dans le stockage local de l'application, elle
+n'est ni partagée entre machines ni sauvegardée, et sa suppression est
+définitive.
+
 ⚠️ Le banc publie une transformation `imu_world → imu_link` pour qu'on voie le
 capteur bouger dans le panneau 3D. C'est une **aide de banc**, à désactiver le
 jour où l'EKF entre en service : deux sources sur la même arête de l'arbre TF
