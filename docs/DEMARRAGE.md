@@ -100,8 +100,8 @@ FreeRTOS à 1 kHz et le pilote TWAI.
 ```bash
 brew install cmake ninja dfu-util python3
 mkdir -p ~/esp && cd ~/esp
-git clone -b v5.5 --recursive https://github.com/espressif/esp-idf.git
-cd esp-idf && ./install.sh esp32
+git clone -b v5.5 --recursive https://github.com/espressif/esp-idf.git esp-idf-v5.5
+cd esp-idf-v5.5 && ./install.sh esp32
 ```
 
 **Linux (Debian / Ubuntu)**
@@ -111,15 +111,24 @@ sudo apt install git wget flex bison gperf python3 python3-pip python3-venv \
                  cmake ninja-build ccache libffi-dev libssl-dev dfu-util \
                  libusb-1.0-0
 mkdir -p ~/esp && cd ~/esp
-git clone -b v5.5 --recursive https://github.com/espressif/esp-idf.git
-cd esp-idf && ./install.sh esp32
+git clone -b v5.5 --recursive https://github.com/espressif/esp-idf.git esp-idf-v5.5
+cd esp-idf-v5.5 && ./install.sh esp32
 ```
 
 **À chaque nouveau terminal**, il faut charger l'environnement — c'est la
 première cause de `idf.py: command not found` :
 
 ```bash
-. ~/esp/esp-idf/export.sh
+. ~/esp/esp-idf-v5.5/export.sh
+```
+
+⚠️ Le dossier s'appelle `esp-idf-v5.5`, pas `esp-idf` : la version est dans le
+nom pour que deux versions puissent coexister, ce qui arrive dès qu'un projet
+tiers en exige une autre. Espressif déconseille de mettre cette ligne dans le
+`.zshrc` — elle ralentit l'ouverture de chaque terminal. Un alias plutôt :
+
+```bash
+echo "alias get_idf='. \$HOME/esp/esp-idf-v5.5/export.sh'" >> ~/.zshrc
 ```
 
 ### Installer le reste
@@ -140,7 +149,7 @@ sudo usermod -aG dialout $USER   # puis se déconnecter et se reconnecter
 ### Construire et flasher
 
 ```bash
-. ~/esp/esp-idf/export.sh
+. ~/esp/esp-idf-v5.5/export.sh
 cd retriever/firmware/esp32_safety
 idf.py set-target esp32          # une seule fois, à la première construction
 idf.py build
