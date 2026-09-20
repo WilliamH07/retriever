@@ -1,0 +1,72 @@
+# Paramètres du YDLIDAR X4 — banc.
+#
+# ⚠️ Ces valeurs sont celles du **X4 classique**, et elles ne conviennent pas au
+# X4 Pro, qui est mono-canal et dont le moteur n'est pas piloté par DTR. Se
+# tromper de variante donne un lidar qui tourne sans jamais publier de scan.
+#
+# Source : table par modèle du pilote officiel ✅ —
+#   X4 | 128000 bauds | échantillonnage 5 kHz | 0,12–10 m | 5–12 Hz (PWM)
+#       | isSingleChannel false | intensity false
+#
+# ⚠️ La clé de premier niveau DOIT être le nom du nœud tel qu'il est lancé.
+# Le fichier de lancement force `name="ydlidar_ros2_driver_node"` pour cette
+# raison : un nœud renommé ne lit plus ses paramètres, et il démarre quand même,
+# avec les valeurs par défaut — c'est-à-dire un autre modèle de lidar.
+
+ydlidar_ros2_driver_node:
+  ros__parameters:
+
+    # /dev/ydlidar est l'alias créé par la règle udev du pilote. Un nom stable
+    # est indispensable dès qu'un deuxième périphérique série existe — et
+    # l'ESP32 en est déjà un.
+    port: /dev/ydlidar
+    baudrate: 128000              # ✅ X4
+
+    # ✅ §03 du dossier : le repère du lidar s'appelle `laser`.
+    frame_id: laser
+
+    lidar_type: 1                 # TYPE_TRIANGLE ✅
+    device_type: 0                # YDLIDAR_TYPE_SERIAL ✅
+    sample_rate: 5                # 5 kHz ✅ X4
+    isSingleChannel: false        # ✅ X4 (le X4 Pro, lui, est mono-canal)
+    intensity: false              # ✅ X4 ne fournit pas d'intensité
+    intensity_bit: 0
+
+    # ⚠️ Le moteur du X4 est piloté par DTR sur la carte adaptatrice. À false,
+    # le moteur ne démarre pas — et le nœud ne signale rien d'autre qu'une
+    # absence de données.
+    support_motor_dtr: true
+
+    # 7 Hz plutôt que 10. Deux raisons : c'est la valeur retenue au §03 du
+    # dossier, et la fréquence est obtenue en pilotant le moteur, donc en
+    # consommant. Tant que le port `USB_PWR` n'a pas son alimentation 5 V
+    # dédiée (§01 ⚠️), inutile de demander au port USB du PC plus que le
+    # nécessaire.
+    frequency: 7.0
+
+    angle_min: -180.0
+    angle_max: 180.0
+    range_min: 0.12               # ✅ X4
+    range_max: 10.0               # ✅ X4 — et non 12, qui est la valeur du Pro
+
+    # ⚠️ Ces deux-là sont EXACTEMENT ce qui retourne ou miroite le scan. Ils ne
+    # se vérifient pas sur le papier : il faut poser un objet dans une direction
+    # connue et regarder où il apparaît. Procédure dans docs/DEMARRAGE.md §4 ter.
+    reversion: false
+    inverted: true
+
+    fixed_resolution: true
+    auto_reconnect: true
+    abnormal_check_count: 4
+
+    # ✅ REP-117 : une mesure hors portée se dit `+inf`, pas `0.0`. À false, le
+    # pilote sort des zéros, qui sont sous `range_min` — chaque consommateur
+    # doit alors les filtrer lui-même, et celui qui oublie voit un obstacle
+    # collé au capteur. Même raisonnement que les covariances à -1 du §AF.5.
+    invalid_range_is_inf: true
+
+    # Secteurs à ignorer, en degrés : "min,max,min,max,…". Vide au banc ; à
+    # remplir une fois le lidar monté, pour masquer ce qu'il voit du châssis.
+    ignore_array: ""
+
+    debug: false

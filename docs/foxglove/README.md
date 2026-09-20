@@ -32,6 +32,21 @@ dans `ros2_ws/src/retriever_bringup/config/link_bench.yaml`. C'est une aide de
 banc : sur le robot, c'est l'EKF qui publie cette transformation, et laisser les
 deux actifs donnerait deux sources sur la même arête de l'arbre TF.
 
+## `bench_lidar.json` — banc lidar
+
+| Panneau | Contenu |
+|---|---|
+| 3D | `/scan` coloré par la distance, repère fixe `base_link`, grille de 20 m |
+| Plot | trois rayons du scan, pour voir la stabilité des mesures dans le temps |
+| Raw Messages | `/scan` — `angle_min`, `angle_increment`, `range_min/max`, la taille du tableau |
+| Diagnostics | `/diagnostics` |
+
+Vue **orthographique vue de dessus** : c'est la seule qui permette de juger
+qu'une pièce ressemble à une pièce. En perspective, un scan 2D est illisible.
+
+⚠️ Deux ponts Foxglove ne peuvent pas écouter le même port. Si le banc IMU
+tourne déjà, lancer le lidar avec `foxglove:=false`.
+
 ### Ce qu'on regarde, et dans quel ordre
 
 1. **Diagnostics** — les trois lignes au vert. C'est le seul panneau qui dit

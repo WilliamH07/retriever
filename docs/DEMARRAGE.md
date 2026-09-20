@@ -340,6 +340,147 @@ C'est irréversible, l'outil demande confirmation.
 
 ---
 
+## 4 ter. Le lidar YDLIDAR X4
+
+⚠️ **Capteur d'intérieur.** Le §00 du dossier est explicite : environnement de
+test spécifié 0/550/2000 lux, plage 0–40 °C, aucun indice IP. Le plein soleil
+c'est 10 000 à 100 000 lux et le récepteur sature. Le X4 sert aux phases 1–2, en
+intérieur, pour développer et valider `slam_toolbox` et Nav2. En extérieur, la
+localisation passera sur GPS + IMU + odométrie.
+
+⚠️ **Alimentation.** Le manuel avertit que beaucoup de ports USB ne fournissent
+pas la pointe de **1 A au démarrage du moteur**, et le §01 retient une
+alimentation 5 V dédiée sur le port `USB_PWR`. Tant qu'on s'en passe, le
+symptôme à connaître est un moteur qui démarre puis cale, ou des scans tronqués
+et irréguliers. Ce n'est **pas** un problème logiciel, et c'est la première
+chose à écarter. Pas de power bank : l'ondulation est pire que le PC.
+
+### Installer YDLidar-SDK
+
+Le pilote ROS dépend d'une bibliothèque CMake qui n'est pas un paquet ROS. Elle
+s'installe une fois, à la racine du système — c'est pourquoi elle ne figure pas
+dans `retriever.repos`.
+
+```bash
+cd ~/src && git clone https://github.com/YDLIDAR/YDLidar-SDK.git
+cd YDLidar-SDK && mkdir -p build && cd build
+cmake .. && make -j$(nproc)
+sudo make install
+sudo ldconfig
+```
+
+### Récupérer et construire le pilote
+
+```bash
+cd ~/retriever/ros2_ws
+vcs import src < retriever.repos       # sudo apt install python3-vcstool si besoin
+source /opt/ros/jazzy/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+```
+
+⚠️ Pas de release binaire Jazzy ✅ — la construction depuis les sources est
+obligatoire, et c'est la branche `humble` du dépôt officiel qui couvre Jazzy.
+`master` y est marquée « old version ».
+
+### L'alias `/dev/ydlidar`
+
+Sans lui, le lidar est `/dev/ttyUSB0` ou `ttyUSB1` selon l'ordre de branchement
+— et l'ESP32 est déjà un périphérique série. Un jour sur deux, chacun prend la
+place de l'autre.
+
+```bash
+cd ~/retriever/ros2_ws
+chmod 0777 src/ydlidar_ros2_driver/startup/*
+sudo sh src/ydlidar_ros2_driver/startup/initenv.sh
+```
+
+Débrancher et rebrancher, puis vérifier :
+
+```bash
+ls -l /dev/ydlidar
+```
+
+### Lancer
+
+```bash
+ros2 launch retriever_bringup bench_lidar.launch.py
+# si le banc IMU tourne deja, son pont Foxglove occupe le port 8765 :
+ros2 launch retriever_bringup bench_lidar.launch.py foxglove:=false
+```
+
+Foxglove → menu des mises en page → **Import from file…** →
+[`docs/foxglove/bench_lidar.json`](foxglove/bench_lidar.json).
+
+### Vérifier, dans cet ordre
+
+**1. La cadence.** ✅ §03 attend 6 à 12 Hz ; on demande 7.
+
+```bash
+ros2 topic hz /scan
+```
+
+**2. La forme du message.**
+
+```bash
+ros2 topic echo /scan --once --field angle_min --field angle_max --field range_min --field range_max
+```
+
+**3. Le taux de points valides.** ✅ §03 : **> 60 %** est sain, 30–60 % dégradé,
+sous 30 % en panne. Les points sans retour sortent en `+inf` (REP-117) :
+
+```bash
+ros2 topic echo /scan --once --field ranges | python3 -c "
+import sys, math
+v = [float(x) for x in sys.stdin.read().replace('[','').replace(']','').split(',') if x.strip()]
+ok = [x for x in v if math.isfinite(x)]
+print(f'{len(ok)}/{len(v)} valides — {100*len(ok)/len(v):.0f} %')"
+```
+
+**4. L'orientation — et celle-là ne se vérifie pas sur le papier.**
+
+⚠️ Les paramètres `reversion` et `inverted` sont exactement ce qui retourne ou
+miroite le scan. Une erreur ici donne une carte qui a l'air correcte et un robot
+qui tourne du mauvais côté. Il faut une mesure physique :
+
+Poser un objet plat — un carton, un livre — **à 1 m droit devant** la direction
+marquée sur le capot du lidar, la pièce par ailleurs dégagée. Dans le panneau 3D
+de Foxglove, vue de dessus, le mur doit apparaître **devant, à 1 m**.
+
+| Ce qu'on voit | Quoi changer dans `lidar_bench.yaml` |
+|---|---|
+| L'objet apparaît **derrière** | `reversion` |
+| La scène est en **miroir** gauche/droite | `inverted` |
+| Les deux | les deux |
+
+Changer **un paramètre à la fois** : il n'y a que quatre combinaisons, et les
+essayer au hasard fait perdre plus de temps que de les parcourir dans l'ordre.
+
+### Dépannage
+
+| Symptôme | Cause la plus fréquente |
+|---|---|
+| Le moteur ne tourne pas du tout | `support_motor_dtr: true` est requis sur le X4 — c'est DTR qui commande le moteur sur la carte adaptatrice |
+| Le moteur démarre puis cale, scans tronqués | Courant insuffisant. Alimenter `USB_PWR` en 5 V séparément ⚠️ |
+| Le nœud démarre, aucun `/scan` | Mauvaise variante : ces paramètres sont ceux du **X4**, le X4 Pro est mono-canal (`isSingleChannel: true`) et n'utilise pas DTR |
+| `/scan` publie mais tout est à `inf` | Objectif obstrué, ou lumière trop forte — voir l'avertissement en tête de section |
+| Les paramètres semblent ignorés | Le nœud a été renommé. La clé de premier niveau du YAML doit être exactement le nom du nœud lancé |
+| `/dev/ydlidar` absent | Règle udev non installée, ou carte non rebranchée depuis |
+| `libydlidar_sdk.so` introuvable au lancement | `sudo ldconfig` oublié après `make install` |
+
+### Ce qui n'est pas encore fait
+
+- **Diagnostics sur `/scan`.** Le §04 prévoit un `DiagnosedPublisher` et un
+  `source_timeout` de 2 s côté collision monitor. Le pilote tiers ne fournit
+  rien de tel : c'est à écrire côté projet.
+- **La position du lidar dans l'URDF.** Le banc publie `base_link → laser` par
+  un `static_transform_publisher`, ce qui est une aide de banc. Sur le robot,
+  c'est `retriever_description` qui décrit le montage, et lui seul.
+- **`ignore_array`** — les secteurs où le lidar voit le châssis, à mesurer une
+  fois monté.
+
+---
+
 ## 5. Tests hôte
 
 Aucun matériel, aucun ESP-IDF, aucun ROS. C'est ce qui tourne le plus vite et

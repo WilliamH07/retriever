@@ -1,0 +1,24 @@
+# Sources tierces de l'espace de travail ROS 2.
+#
+#     cd ros2_ws
+#     vcs import src < retriever.repos
+#
+# Pourquoi un fichier plutôt qu'un `git clone` dans un README : la version qui
+# tourne doit être écrite quelque part. Même discipline que le sous-module sh2
+# du firmware — quand un capteur se met à mal se comporter six mois plus tard,
+# la première question est « qu'est-ce qui a changé », et elle doit avoir une
+# réponse.
+#
+# ⚠️ YDLidar-SDK n'est PAS ici. C'est une bibliothèque CMake, pas un paquet ROS,
+# et le pilote la cherche avec `find_package`. Elle s'installe séparément, une
+# fois, à la racine du système — voir docs/DEMARRAGE.md §4 ter.
+
+repositories:
+
+  ydlidar_ros2_driver:
+    type: git
+    url: https://github.com/YDLIDAR/ydlidar_ros2_driver.git
+    # ⚠️ Branche `humble`, pas `master`. Le dépôt officiel marque `master`
+    # « old version » et indique `humble` comme la branche « for humble, jazzy,
+    # etc ». Il n'existe pas de release binaire Jazzy ✅ (§03 du dossier).
+    version: humble
