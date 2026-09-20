@@ -55,6 +55,18 @@ enums:
       MOTION_FRONT: 2
       MOTION_REAR:  3
 
+  imu_cal_action:
+    doc: >
+      Commandes d'étalonnage de l'IMU, portées par IMU_CAL_CMD. Le BNO085 sait
+      corriger ses biais en fonctionnement, mais il faut le lui demander, et
+      l'écrire en flash pour que ça survive à la mise hors tension.
+    values:
+      NONE:    0
+      ENABLE:  1   # active l'étalonnage dynamique sur les capteurs du masque
+      DISABLE: 2   # fige les corrections en cours
+      SAVE:    3   # écrit le DCD en flash, sans reset
+      CLEAR:   4   # efface le DCD et redémarre le capteur — dernier recours
+
   node_state:
     doc: "État de haut niveau publié par tout nœud dans son HEARTBEAT."
     values:
@@ -358,6 +370,25 @@ frames:
       - {name: reset_count,   type: u8, doc: "Resets du BNO085 depuis le boot — doit rester à 0"}
       - {name: dropped,       type: u16, doc: "Échantillons perdus faute de place en file"}
 
+  - name: IMU_CAL
+    id: 0x215
+    sender: SAFETY
+    rate_hz: 10
+    impl: bench
+    doc: >
+      État de l'étalonnage dynamique. Deux choses distinctes y sont dites, et
+      les confondre coûte une séance de banc : l'étalonnage est-il ACTIF — le
+      capteur corrige-t-il ses biais en ce moment — et a-t-il été SAUVEGARDÉ —
+      la correction survivra-t-elle à la mise hors tension. `saves` répond à la
+      seconde ; tant qu'il vaut 0, tout le travail d'étalonnage est en RAM.
+    fields:
+      - {name: status_mag,  type: u8, doc: "0 non fiable, 1 basse, 2 moyenne, 3 haute"}
+      - {name: enabled,     type: u8, doc: "b0 accel b1 gyro b2 mag — masque réellement accepté par le capteur"}
+      - {name: saves,       type: u8, doc: "Écritures DCD en flash depuis le démarrage"}
+      - {name: last_action, type: u8, enum: imu_cal_action}
+      - {name: last_result, type: i8, doc: "Code de retour SH-2 de la dernière commande. 0 = succès"}
+      - {name: flags,       type: u8, doc: "b0 sauvegarde automatique du DCD active"}
+
   - name: THERMAL
     id: 0x220
     sender: SAFETY
@@ -406,6 +437,21 @@ frames:
       - {name: value, type: i32}
       - {name: seq,   type: u8}
       - {name: magic, type: u8, doc: "0xC0"}
+
+  - name: IMU_CAL_CMD
+    id: 0x321
+    sender: HOST
+    rate_hz: 0
+    impl: bench
+    doc: >
+      Pilote l'étalonnage de l'IMU depuis le banc. ⚠️ `magic` vaut 0xCA, et le
+      nœud rejette la trame sans lui : effacer un DCD est irréversible et coûte
+      dix minutes de manipulations, ce n'est pas une chose qu'une trame
+      corrompue doit pouvoir déclencher.
+    fields:
+      - {name: action,  type: u8, enum: imu_cal_action}
+      - {name: sensors, type: u8, doc: "b0 accel b1 gyro b2 mag — n'a de sens que pour ENABLE"}
+      - {name: magic,   type: u8, doc: "0xCA"}
 
   - name: LINK_PING
     id: 0x330

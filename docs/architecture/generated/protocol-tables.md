@@ -2,7 +2,7 @@
 
 # Table des trames — protocole Retriever
 
-Version **0.1.0** · hash `0xC1214F10` · charge utile ≤ 8 octets · entiers petit-boutiste.
+Version **0.1.0** · hash `0xE8391C47` · charge utile ≤ 8 octets · entiers petit-boutiste.
 
 | ID | Trame | Émetteur | DLC | Hz | État | Contenu |
 |---|---|---|:-:|:-:|:-:|---|
@@ -24,10 +24,12 @@ Version **0.1.0** · hash `0xC1214F10` · charge utile ≤ 8 octets · entiers p
 | `0x212` | `IMU_ACCEL` | SAFETY | 8 | 100 | bench | ax:i16×0.002, ay:i16×0.002, az:i16×0.002, seq:u8, flags:u8 |
 | `0x214` | `IMU_MAG` | SAFETY | 8 | 10 | bench | mx:i16×0.01, my:i16×0.01, mz:i16×0.01, seq:u8, flags:u8 |
 | `0x213` | `IMU_STATUS` | SAFETY | 8 | 10 | bench | quat_accuracy:u16×0.0001, status_rot:u8, status_gyro:u8, status_accel:u8, reset_count:u8, dropped:u16 |
+| `0x215` | `IMU_CAL` | SAFETY | 6 | 10 | bench | status_mag:u8, enabled:u8, saves:u8, last_action:u8, last_result:i8, flags:u8 |
 | `0x220` | `THERMAL` | SAFETY | 8 | 1 | planned | temp_a_c:i8, temp_b_c:i8, fan_a_pct:u8, fan_b_pct:u8, rpm_a:u16, rpm_b:u16 |
 | `0x300` | `TIME_SYNC` | HOST | 8 | 1 | bench | t_host_us:u64 |
 | `0x310` | `ARM_REQUEST` | HOST | 2 | évt | planned | arm:u8, magic:u8 |
 | `0x320` | `CONFIG` | HOST | 8 | évt | planned | key:u16, value:i32, seq:u8, magic:u8 |
+| `0x321` | `IMU_CAL_CMD` | HOST | 3 | évt | bench | action:u8, sensors:u8, magic:u8 |
 | `0x330` | `LINK_PING` | HOST | 7 | évt | bench | target:u8, seq:u16, t_tx_us:u32 |
 | `0x331` | `LINK_PONG` | SAFETY | 7 | évt | bench | source:u8, seq:u16, t_tx_us:u32 |
 | `0x7F0` | `LOG` | SAFETY | 8 | évt | bench | header:u8, c0:u8, c1:u8, c2:u8, c3:u8, c4:u8, c5:u8, c6:u8 |
@@ -39,8 +41,8 @@ Version **0.1.0** · hash `0xC1214F10` · charge utile ≤ 8 octets · entiers p
 
 Calculé sur les cadences déclarées ci-dessus, hors trames événementielles.
 
-- **694.6 trames/s** au total.
-- **CAN 500 kbit/s** : ≈ 76.9 kbit/s, soit **15.4 %** du bus (bourrage de bits non compté, majorer d'environ 15 %).
-- **Série** : ≈ 9.4 ko/s de charge utile encadrée. À 921 600 bauds 8N1 (92 160 o/s) → **10.2 %**. À 115 200 bauds → **82.0 %**.
+- **704.6 trames/s** au total.
+- **CAN 500 kbit/s** : ≈ 77.9 kbit/s, soit **15.6 %** du bus (bourrage de bits non compté, majorer d'environ 15 %).
+- **Série** : ≈ 9.6 ko/s de charge utile encadrée. À 921 600 bauds 8N1 (92 160 o/s) → **10.4 %**. À 115 200 bauds → **83.0 %**.
 
 Le second chiffre est la raison pour laquelle le banc tourne à 921 600 et non à 115 200 : voir §AC.3.

@@ -4,7 +4,7 @@
  *  Source      : firmware/protocol/protocol.yaml
  *  Générateur  : firmware/protocol/generate.py
  *  Version     : 0.1.0
- *  Hash        : 0xC1214F10  (c1214f10cc5f4e5fcbc0e9f3360684a8494f264197787dd575b095843d2aa73c)
+ *  Hash        : 0xE8391C47  (e8391c479174884910363bc1ccd7f7db4624fe10cca7f401faf56a43fde03e80)
  *
  *  Toute modification doit se faire dans le YAML puis passer par le
  *  générateur. La CI (tools/check_protocol_sync.py) échoue sinon.
@@ -28,8 +28,8 @@ extern "C" {
 #endif
 
 #define RT_PROTOCOL_VERSION   "0.1.0"
-#define RT_PROTOCOL_HASH      0xC1214F10u
-#define RT_PROTOCOL_HASH_FULL "c1214f10cc5f4e5fcbc0e9f3360684a8494f264197787dd575b095843d2aa73c"
+#define RT_PROTOCOL_HASH      0xE8391C47u
+#define RT_PROTOCOL_HASH_FULL "e8391c479174884910363bc1ccd7f7db4624fe10cca7f401faf56a43fde03e80"
 #define RT_MAX_PAYLOAD        8u
 #define RT_ID_BITS            11u
 #define RT_ID_MASK            0x7FFu
@@ -88,6 +88,15 @@ typedef enum {
     RT_NODE_ID_MOTION_FRONT = 2,
     RT_NODE_ID_MOTION_REAR = 3,
 } rt_node_id_e;
+
+/* Commandes d'étalonnage de l'IMU, portées par IMU_CAL_CMD. Le BNO085 sait corriger ses biais en fonctionnement, mais il faut le lui demander, et l'écrire en flash pour que ça survive à la mise hors tension. */
+typedef enum {
+    RT_IMU_CAL_ACTION_NONE = 0,
+    RT_IMU_CAL_ACTION_ENABLE = 1,
+    RT_IMU_CAL_ACTION_DISABLE = 2,
+    RT_IMU_CAL_ACTION_SAVE = 3,
+    RT_IMU_CAL_ACTION_CLEAR = 4,
+} rt_imu_cal_action_e;
 
 /* État de haut niveau publié par tout nœud dans son HEARTBEAT. */
 typedef enum {
@@ -166,10 +175,12 @@ typedef enum {
 #define RT_ID_IMU_ACCEL                0x212u
 #define RT_ID_IMU_MAG                  0x214u
 #define RT_ID_IMU_STATUS               0x213u
+#define RT_ID_IMU_CAL                  0x215u
 #define RT_ID_THERMAL                  0x220u
 #define RT_ID_TIME_SYNC                0x300u
 #define RT_ID_ARM_REQUEST              0x310u
 #define RT_ID_CONFIG                   0x320u
+#define RT_ID_IMU_CAL_CMD              0x321u
 #define RT_ID_LINK_PING                0x330u
 #define RT_ID_LINK_PONG                0x331u
 #define RT_ID_LOG                      0x7F0u
@@ -195,10 +206,12 @@ typedef enum {
 #define RT_DLC_IMU_ACCEL               8u
 #define RT_DLC_IMU_MAG                 8u
 #define RT_DLC_IMU_STATUS              8u
+#define RT_DLC_IMU_CAL                 6u
 #define RT_DLC_THERMAL                 8u
 #define RT_DLC_TIME_SYNC               8u
 #define RT_DLC_ARM_REQUEST             2u
 #define RT_DLC_CONFIG                  8u
+#define RT_DLC_IMU_CAL_CMD             3u
 #define RT_DLC_LINK_PING               7u
 #define RT_DLC_LINK_PONG               7u
 #define RT_DLC_LOG                     8u
@@ -1038,6 +1051,60 @@ static inline bool rt_imu_status_unpack(const rt_frame_t *f, rt_imu_status_t *m)
     return true;
 }
 
+/* IMU_CAL  id 0x215  dlc 6  émetteur SAFETY  10 Hz  [bench]
+ * État de l'étalonnage dynamique. Deux choses distinctes y sont dites, et
+ * les confondre coûte une séance de banc : l'étalonnage est-il ACTIF — le
+ * capteur corrige-t-il ses biais en ce moment — et a-t-il été SAUVEGARDÉ —
+ * la correction survivra-t-elle à la mise hors tension. `saves` répond à la
+ * seconde ; tant qu'il vaut 0, tout le travail d'étalonnage est en RAM.
+ *
+ *   @0 status_mag: u8  0 non fiable, 1 basse, 2 moyenne, 3 haute
+ *   @1 enabled: u8  b0 accel b1 gyro b2 mag — masque réellement accepté par le capteur
+ *   @2 saves: u8  Écritures DCD en flash depuis le démarrage
+ *   @3 last_action: u8
+ *   @4 last_result: i8  Code de retour SH-2 de la dernière commande. 0 = succès
+ *   @5 flags: u8  b0 sauvegarde automatique du DCD active
+ */
+typedef struct {
+    uint8_t  status_mag;
+    uint8_t  enabled;
+    uint8_t  saves;
+    uint8_t  last_action;
+    int8_t   last_result;
+    uint8_t  flags;
+} rt_imu_cal_t;
+
+static inline void rt_imu_cal_pack(const rt_imu_cal_t *m, rt_frame_t *f)
+{
+    f->id = RT_ID_IMU_CAL;
+    f->dlc = RT_DLC_IMU_CAL;
+    memset(f->data, 0, sizeof(f->data));
+    uint8_t raw_status_mag = (uint8_t)(m->status_mag);
+    rt_put_u8(f->data + 0, raw_status_mag);
+    uint8_t raw_enabled = (uint8_t)(m->enabled);
+    rt_put_u8(f->data + 1, raw_enabled);
+    uint8_t raw_saves = (uint8_t)(m->saves);
+    rt_put_u8(f->data + 2, raw_saves);
+    uint8_t raw_last_action = (uint8_t)(m->last_action);
+    rt_put_u8(f->data + 3, raw_last_action);
+    int8_t raw_last_result = (int8_t)(m->last_result);
+    rt_put_i8(f->data + 4, raw_last_result);
+    uint8_t raw_flags = (uint8_t)(m->flags);
+    rt_put_u8(f->data + 5, raw_flags);
+}
+
+static inline bool rt_imu_cal_unpack(const rt_frame_t *f, rt_imu_cal_t *m)
+{
+    if (f->id != RT_ID_IMU_CAL || f->dlc < RT_DLC_IMU_CAL) return false;
+    m->status_mag = rt_get_u8(f->data + 0);
+    m->enabled = rt_get_u8(f->data + 1);
+    m->saves = rt_get_u8(f->data + 2);
+    m->last_action = rt_get_u8(f->data + 3);
+    m->last_result = rt_get_i8(f->data + 4);
+    m->flags = rt_get_u8(f->data + 5);
+    return true;
+}
+
 /* THERMAL  id 0x220  dlc 8  émetteur SAFETY  1 Hz  [planned]
  *
  *   @0 temp_a_c: i8 [degC]
@@ -1181,6 +1248,44 @@ static inline bool rt_config_unpack(const rt_frame_t *f, rt_config_t *m)
     m->value = rt_get_i32(f->data + 2);
     m->seq = rt_get_u8(f->data + 6);
     m->magic = rt_get_u8(f->data + 7);
+    return true;
+}
+
+/* IMU_CAL_CMD  id 0x321  dlc 3  émetteur HOST  [bench]
+ * Pilote l'étalonnage de l'IMU depuis le banc. ⚠️ `magic` vaut 0xCA, et le
+ * nœud rejette la trame sans lui : effacer un DCD est irréversible et coûte
+ * dix minutes de manipulations, ce n'est pas une chose qu'une trame
+ * corrompue doit pouvoir déclencher.
+ *
+ *   @0 action: u8
+ *   @1 sensors: u8  b0 accel b1 gyro b2 mag — n'a de sens que pour ENABLE
+ *   @2 magic: u8  0xCA
+ */
+typedef struct {
+    uint8_t  action;
+    uint8_t  sensors;
+    uint8_t  magic;
+} rt_imu_cal_cmd_t;
+
+static inline void rt_imu_cal_cmd_pack(const rt_imu_cal_cmd_t *m, rt_frame_t *f)
+{
+    f->id = RT_ID_IMU_CAL_CMD;
+    f->dlc = RT_DLC_IMU_CAL_CMD;
+    memset(f->data, 0, sizeof(f->data));
+    uint8_t raw_action = (uint8_t)(m->action);
+    rt_put_u8(f->data + 0, raw_action);
+    uint8_t raw_sensors = (uint8_t)(m->sensors);
+    rt_put_u8(f->data + 1, raw_sensors);
+    uint8_t raw_magic = (uint8_t)(m->magic);
+    rt_put_u8(f->data + 2, raw_magic);
+}
+
+static inline bool rt_imu_cal_cmd_unpack(const rt_frame_t *f, rt_imu_cal_cmd_t *m)
+{
+    if (f->id != RT_ID_IMU_CAL_CMD || f->dlc < RT_DLC_IMU_CAL_CMD) return false;
+    m->action = rt_get_u8(f->data + 0);
+    m->sensors = rt_get_u8(f->data + 1);
+    m->magic = rt_get_u8(f->data + 2);
     return true;
 }
 
@@ -1462,10 +1567,12 @@ static const rt_frame_info_t rt_frame_table[] = {
     { 0x212u, 8u, "IMU_ACCEL" },
     { 0x214u, 8u, "IMU_MAG" },
     { 0x213u, 8u, "IMU_STATUS" },
+    { 0x215u, 6u, "IMU_CAL" },
     { 0x220u, 8u, "THERMAL" },
     { 0x300u, 8u, "TIME_SYNC" },
     { 0x310u, 2u, "ARM_REQUEST" },
     { 0x320u, 8u, "CONFIG" },
+    { 0x321u, 3u, "IMU_CAL_CMD" },
     { 0x330u, 7u, "LINK_PING" },
     { 0x331u, 7u, "LINK_PONG" },
     { 0x7F0u, 8u, "LOG" },
@@ -1473,7 +1580,7 @@ static const rt_frame_info_t rt_frame_table[] = {
     { 0x702u, 8u, "HEARTBEAT_MOTION_FRONT" },
     { 0x703u, 8u, "HEARTBEAT_MOTION_REAR" },
 };
-#define RT_FRAME_COUNT 28u
+#define RT_FRAME_COUNT 30u
 
 static inline const char *rt_frame_name(uint16_t id)
 {

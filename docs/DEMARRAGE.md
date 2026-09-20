@@ -266,6 +266,65 @@ est une faute. Le paramètre est `bench.publish_tf` dans
 
 ---
 
+## 4 bis. Étalonner l'IMU
+
+⚠️ **À faire une fois, avant toute mesure.** Sans ça le BNO085 sort ses valeurs
+d'usine : biais accéléromètre de 0,58 m/s² mesuré au banc le 20 septembre 2026,
+et un cap dont le capteur annonce lui-même 180° d'incertitude.
+
+Deux choses distinctes doivent être vraies, et les confondre coûte une séance :
+
+| | |
+|---|---|
+| **actif** | le capteur corrige ses biais en ce moment |
+| **sauvegardé** | la correction survivra à la mise hors tension |
+
+Le firmware active les trois capteurs au démarrage et demande la sauvegarde
+automatique du DCD. Il le refait après chaque reset du capteur — un reset efface
+cette configuration comme il efface les rapports.
+
+Coupe le nœud ROS (un seul programme peut tenir le port), puis :
+
+```bash
+python3 tools/imu_cal.py --device <port>
+```
+
+La procédure est physique et tient en une minute :
+
+1. **accéléromètre** — poser la carte sur ses six faces, immobile environ une
+   seconde à chaque fois. `accel` monte à `haute` ;
+2. **gyromètre** — laisser la carte parfaitement immobile trois secondes.
+   `gyro` monte à `haute` ;
+3. **magnétomètre** — un huit lent en l'air, loin de tout métal et de toute
+   alimentation, une quinzaine de secondes. `mag` puis `orientation` montent ;
+4. quand les quatre sont à `haute` :
+
+```bash
+python3 tools/imu_cal.py --device <port> --save
+```
+
+`sauvegardes en flash` doit passer à 1. Tant qu'il vaut 0, tout le travail est
+en RAM et disparaît à l'extinction.
+
+Pour repartir de zéro si un étalonnage a mal tourné — un huit fait près d'un
+moteur, par exemple :
+
+```bash
+python3 tools/imu_cal.py --device <port> --clear
+```
+
+C'est irréversible, l'outil demande confirmation.
+
+**Vérification après étalonnage**, côté ROS :
+
+- la norme de `linear_acceleration` doit valoir 9,81 ± 0,05 m/s² dans **toutes**
+  les orientations. Si elle reste constante mais fausse, c'est l'échelle ; si
+  elle varie avec l'orientation, c'est qu'il reste un biais ;
+- `orientation_covariance[8]` doit tomber de 9,87 (π², soit 180° d'incertitude)
+  à quelque chose de l'ordre de 0,008 (5°).
+
+---
+
 ## 5. Tests hôte
 
 Aucun matériel, aucun ESP-IDF, aucun ROS. C'est ce qui tourne le plus vite et

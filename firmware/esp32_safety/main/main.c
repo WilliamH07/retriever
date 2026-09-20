@@ -90,6 +90,25 @@ static bool on_frame(const rt_frame_t *f, void *user)
         return true;
     }
 
+    if (f->id == RT_ID_IMU_CAL_CMD) {
+        rt_imu_cal_cmd_t cmd;
+        if (!rt_imu_cal_cmd_unpack(f, &cmd)) {
+            return true;
+        }
+        /* ⚠️ Le garde n'est pas décoratif : CLEAR efface un DCD en flash, ce
+         * qui coûte dix minutes de manipulations à refaire. Une trame dont le
+         * CRC passe mais dont le contenu est faux — un décalage de champ après
+         * un changement de protocole non synchronisé, par exemple — ne doit pas
+         * pouvoir le déclencher. */
+        if (cmd.magic != 0xCAu) {
+            ESP_LOGW(TAG, "commande d'etalonnage sans garde, ignoree");
+            return true;
+        }
+        /* On dépose seulement : la pile SH-2 appartient à la tâche de l'IMU. */
+        rt_imu_cal_request(cmd.action, cmd.sensors);
+        return true;
+    }
+
     return false;   /* tout le reste part en file, pour la tâche de service */
 }
 
@@ -169,6 +188,23 @@ static void publish_status(const rt_imu_sample_t *last)
     send_or_count(&f);
 }
 
+static void publish_cal(void)
+{
+    rt_imu_cal_state_t c;
+    rt_imu_get_cal(&c);
+    const rt_imu_cal_t m = {
+        .status_mag = c.status_mag,
+        .enabled = c.enabled,
+        .saves = c.saves,
+        .last_action = c.last_action,
+        .last_result = c.last_result,
+        .flags = (uint8_t)(c.autosave ? 0x01u : 0x00u),
+    };
+    rt_frame_t f;
+    rt_imu_cal_pack(&m, &f);
+    send_or_count(&f);
+}
+
 static void publish_task(void *arg)
 {
     (void)arg;
@@ -202,6 +238,7 @@ static void publish_task(void *arg)
             next_status_us = now + 100000;   /* 10 Hz */
             publish_status(&last);
             publish_mag(&last);
+            publish_cal();
         }
     }
 }

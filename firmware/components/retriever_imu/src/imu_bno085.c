@@ -104,6 +104,19 @@ static uint32_t s_ev_gyro;
 static uint32_t s_ev_accel;
 static uint32_t s_ev_decode_fail;
 
+/* --- étalonnage -------------------------------------------------------- */
+/* La demande arrive de la tâche de réception, l'exécution a lieu dans la tâche
+ * de l'IMU : `volatile` + écriture atomique d'un octet suffisent, il n'y a
+ * qu'un producteur et qu'un consommateur. */
+static volatile uint8_t s_cal_req_action;
+static volatile uint8_t s_cal_req_sensors;
+static uint8_t s_cal_enabled;
+static uint8_t s_cal_saves;
+static uint8_t s_cal_last_action;
+static int8_t  s_cal_last_result;
+static bool    s_cal_autosave;
+static uint8_t s_cal_status_mag;
+
 static void publish_if_complete(void)
 {
     const uint8_t needed = RT_IMU_VALID_QUAT | RT_IMU_VALID_GYRO | RT_IMU_VALID_ACCEL;
@@ -197,6 +210,7 @@ static void on_sensor(void *cookie, sh2_SensorEvent_t *event)
         s_building.mag[1] = v.un.magneticField.y;
         s_building.mag[2] = v.un.magneticField.z;
         s_building.status_mag = (uint8_t)(v.status & 0x03u);
+        s_cal_status_mag = s_building.status_mag;
         s_building.valid |= RT_IMU_VALID_MAG;
         s_last_mag_us = rt_imu_now_us();
         break;
@@ -259,6 +273,98 @@ static esp_err_t configure_reports(void)
 }
 
 /* --------------------------------------------------------------------------
+ *  Étalonnage
+ *
+ *  Tout ce qui suit ne s'exécute QUE dans la tâche de l'IMU. Voir l'avertissement
+ *  sur rt_imu_cal_request() dans imu.h.
+ * ----------------------------------------------------------------------- */
+
+static void cal_apply(uint8_t sensors)
+{
+    uint8_t mask = 0u;
+    if (sensors & RT_IMU_CAL_SENSOR_ACCEL) mask |= SH2_CAL_ACCEL;
+    if (sensors & RT_IMU_CAL_SENSOR_GYRO)  mask |= SH2_CAL_GYRO;
+    if (sensors & RT_IMU_CAL_SENSOR_MAG)   mask |= SH2_CAL_MAG;
+
+    const int rc = sh2_setCalConfig(mask);
+    s_cal_last_result = (int8_t)rc;
+    if (rc == SH2_OK) {
+        s_cal_enabled = sensors;
+    } else {
+        ESP_LOGW(TAG, "etalonnage refuse par le capteur (%d)", rc);
+    }
+}
+
+/**
+ * Étalonnage par défaut, appliqué au démarrage ET après chaque reset du
+ * capteur — un reset efface la configuration, exactement comme il efface les
+ * rapports. L'oublier donne un capteur qui s'étalonne jusqu'au premier reset
+ * puis plus jamais, sans que rien ne le signale.
+ */
+static void cal_install_defaults(void)
+{
+    cal_apply(RT_IMU_CAL_SENSOR_ALL);
+
+    /* Sauvegarde automatique du DCD : le capteur écrit lui-même en flash quand
+     * il juge son étalonnage meilleur que celui qui y est stocké. C'est la voie
+     * sûre — sh2_saveDcdNow() reste disponible pour forcer la main au banc. */
+    const int rc = sh2_setDcdAutoSave(true);
+    s_cal_autosave = (rc == SH2_OK);
+    if (rc != SH2_OK) {
+        ESP_LOGW(TAG, "sauvegarde automatique du DCD refusee (%d)", rc);
+    }
+}
+
+static void cal_service(void)
+{
+    const uint8_t action = s_cal_req_action;
+    if (action == (uint8_t)RT_IMU_CAL_ACTION_NONE) {
+        return;
+    }
+    const uint8_t sensors = s_cal_req_sensors;
+    s_cal_req_action = (uint8_t)RT_IMU_CAL_ACTION_NONE;
+    s_cal_last_action = action;
+
+    switch (action) {
+    case RT_IMU_CAL_ACTION_ENABLE:
+        cal_apply(sensors);
+        break;
+
+    case RT_IMU_CAL_ACTION_DISABLE:
+        cal_apply(0u);
+        break;
+
+    case RT_IMU_CAL_ACTION_SAVE: {
+        /* saveDcdNow et NON saveDcdAndReset : le second redémarre le capteur,
+         * ce qui coupe le flux pendant une demi-seconde et fait repartir les
+         * rapports de zéro. On ne veut pas payer ça pour une sauvegarde. */
+        const int rc = sh2_saveDcdNow();
+        s_cal_last_result = (int8_t)rc;
+        if (rc == SH2_OK && s_cal_saves < 255u) {
+            s_cal_saves++;
+        }
+        break;
+    }
+
+    case RT_IMU_CAL_ACTION_CLEAR: {
+        /* Irréversible, et le capteur redémarre : la boucle de service voit le
+         * reset et reconfigure tout, étalonnage compris. */
+        const int rc = sh2_clearDcdAndReset();
+        s_cal_last_result = (int8_t)rc;
+        break;
+    }
+
+    default:
+        s_cal_last_result = (int8_t)SH2_ERR_BAD_PARAM;
+        break;
+    }
+
+    ESP_LOGI(TAG, "etalonnage : action=%u masque=0x%02x sauvegardes=%u resultat=%d",
+             (unsigned)action, (unsigned)s_cal_enabled, (unsigned)s_cal_saves,
+             (int)s_cal_last_result);
+}
+
+/* --------------------------------------------------------------------------
  *  Tâche de service
  * ----------------------------------------------------------------------- */
 
@@ -290,6 +396,10 @@ static void imu_task(void *arg)
         rt_sh2_hal_wait_intn(50);
         sh2_service();
 
+        /* Après sh2_service() : une commande d'étalonnage arrivée pendant le
+         * service part dès ce tour, sans attendre le suivant. */
+        cal_service();
+
         const int64_t now_us = esp_timer_get_time();
         if (now_us >= next_report_us) {
             next_report_us = now_us + 5000000;   /* toutes les 5 s */
@@ -303,7 +413,8 @@ static void imu_task(void *arg)
             if (configure_reports() != ESP_OK) {
                 ESP_LOGE(TAG, "reconfiguration impossible apres reset");
             } else {
-                ESP_LOGW(TAG, "rapports reconfigures apres reset");
+                cal_install_defaults();
+                ESP_LOGW(TAG, "rapports et etalonnage reconfigures apres reset");
             }
         }
     }
@@ -364,6 +475,10 @@ esp_err_t rt_imu_init(const rt_imu_config_t *cfg)
         return ESP_FAIL;
     }
 
+    cal_install_defaults();
+    ESP_LOGI(TAG, "etalonnage dynamique masque=0x%02x, sauvegarde auto %s",
+             (unsigned)s_cal_enabled, s_cal_autosave ? "active" : "REFUSEE");
+
     ESP_LOGI(TAG, "%s a %d Hz%s", mode_name(s_cfg.mode), s_cfg.rate_hz,
              s_cfg.enable_mag ? ", magnetometre a 10 Hz" : "");
 
@@ -383,3 +498,22 @@ esp_err_t rt_imu_read(rt_imu_sample_t *out, TickType_t wait)
 
 uint32_t rt_imu_reset_count(void) { return s_resets; }
 uint32_t rt_imu_dropped(void) { return s_dropped; }
+
+void rt_imu_cal_request(uint8_t action, uint8_t sensors)
+{
+    s_cal_req_sensors = sensors;
+    s_cal_req_action = action;   /* en dernier : c'est lui qui arme la demande */
+}
+
+void rt_imu_get_cal(rt_imu_cal_state_t *out)
+{
+    if (out == NULL) {
+        return;
+    }
+    out->status_mag = s_cal_status_mag;
+    out->enabled = s_cal_enabled;
+    out->saves = s_cal_saves;
+    out->last_action = s_cal_last_action;
+    out->last_result = s_cal_last_result;
+    out->autosave = s_cal_autosave;
+}

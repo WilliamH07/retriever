@@ -4,7 +4,7 @@
 //  Source     : firmware/protocol/protocol.yaml
 //  Générateur : firmware/protocol/generate.py
 //  Version    : 0.1.0
-//  Hash       : 0xC1214F10
+//  Hash       : 0xE8391C47
 //
 //  Enveloppe C++17 au-dessus de l'en-tête C. Le code de sérialisation n'est
 //  PAS dupliqué : ce fichier inclut retriever_protocol.h, exactement le même
@@ -49,6 +49,7 @@ inline std::optional<std::uint8_t> expected_dlc(std::uint16_t id)
 namespace enums
 {
 using NodeId = ::rt_node_id_e;
+using ImuCalAction = ::rt_imu_cal_action_e;
 using NodeState = ::rt_node_state_e;
 using SafetyState = ::rt_safety_state_e;
 using FaultCause = ::rt_fault_cause_e;
@@ -361,6 +362,23 @@ inline std::optional<ImuStatus> unpack_imu_status(const Frame & f)
     return m;
 }
 
+// IMU_CAL — id 0x215, dlc 6, émetteur SAFETY [bench]
+using ImuCal = ::rt_imu_cal_t;
+inline constexpr std::uint16_t kImuCalId = RT_ID_IMU_CAL;
+inline constexpr std::uint8_t  kImuCalDlc = RT_DLC_IMU_CAL;
+inline Frame pack(const ImuCal & m)
+{
+    Frame f{};
+    ::rt_imu_cal_pack(&m, &f);
+    return f;
+}
+inline std::optional<ImuCal> unpack_imu_cal(const Frame & f)
+{
+    ImuCal m{};
+    if (!::rt_imu_cal_unpack(&f, &m)) return std::nullopt;
+    return m;
+}
+
 // THERMAL — id 0x220, dlc 8, émetteur SAFETY [planned]
 using Thermal = ::rt_thermal_t;
 inline constexpr std::uint16_t kThermalId = RT_ID_THERMAL;
@@ -426,6 +444,23 @@ inline std::optional<Config> unpack_config(const Frame & f)
 {
     Config m{};
     if (!::rt_config_unpack(&f, &m)) return std::nullopt;
+    return m;
+}
+
+// IMU_CAL_CMD — id 0x321, dlc 3, émetteur HOST [bench]
+using ImuCalCmd = ::rt_imu_cal_cmd_t;
+inline constexpr std::uint16_t kImuCalCmdId = RT_ID_IMU_CAL_CMD;
+inline constexpr std::uint8_t  kImuCalCmdDlc = RT_DLC_IMU_CAL_CMD;
+inline Frame pack(const ImuCalCmd & m)
+{
+    Frame f{};
+    ::rt_imu_cal_cmd_pack(&m, &f);
+    return f;
+}
+inline std::optional<ImuCalCmd> unpack_imu_cal_cmd(const Frame & f)
+{
+    ImuCalCmd m{};
+    if (!::rt_imu_cal_cmd_unpack(&f, &m)) return std::nullopt;
     return m;
 }
 

@@ -113,6 +113,47 @@ esp_err_t rt_imu_init(const rt_imu_config_t *cfg);
 /** Retire un échantillon de la file. Bloque jusqu'à `wait`. */
 esp_err_t rt_imu_read(rt_imu_sample_t *out, TickType_t wait);
 
+/* --------------------------------------------------------------------------
+ *  Étalonnage
+ *
+ *  Le BNO085 corrige ses biais en fonctionnement — c'est son intérêt principal
+ *  face à une centrale brute. Mais il ne le fait QUE si on le lui demande, et
+ *  il ne conserve le résultat d'une mise sous tension à l'autre QUE s'il est
+ *  écrit en flash. Sans les deux, le capteur sort ses valeurs d'usine : biais
+ *  accéléromètre de l'ordre d'un demi m/s² — mesuré à 0,58 sur le banc du
+ *  20 septembre 2026 — et un cap dont le capteur annonce lui-même 180°
+ *  d'incertitude, faute de magnétomètre jamais étalonné.
+ * ----------------------------------------------------------------------- */
+
+#define RT_IMU_CAL_SENSOR_ACCEL 0x01u
+#define RT_IMU_CAL_SENSOR_GYRO  0x02u
+#define RT_IMU_CAL_SENSOR_MAG   0x04u
+#define RT_IMU_CAL_SENSOR_ALL   (RT_IMU_CAL_SENSOR_ACCEL | RT_IMU_CAL_SENSOR_GYRO | \
+                                 RT_IMU_CAL_SENSOR_MAG)
+
+typedef struct {
+    uint8_t status_mag;   /**< 0 non fiable … 3 haute */
+    uint8_t enabled;      /**< masque RT_IMU_CAL_SENSOR_* réellement accepté */
+    uint8_t saves;        /**< écritures DCD en flash depuis le démarrage */
+    uint8_t last_action;  /**< rt_imu_cal_action_e de la dernière commande */
+    int8_t  last_result;  /**< code de retour SH-2, 0 = succès */
+    bool    autosave;     /**< sauvegarde automatique du DCD demandée au capteur */
+} rt_imu_cal_state_t;
+
+/**
+ * Demande une action d'étalonnage. Appelable depuis N'IMPORTE QUELLE tâche.
+ *
+ * ⚠️ La pile SH-2 n'est pas réentrante et n'est touchée que par la tâche de
+ * service de l'IMU. Cette fonction ne fait donc que déposer la demande ; elle
+ * est exécutée au tour de boucle suivant, en moins de 50 ms. Appeler sh2_*
+ * depuis la tâche de réception de la liaison corromprait l'état SHTP au
+ * milieu d'un transfert, et le symptôme serait un capteur muet sans erreur.
+ */
+void rt_imu_cal_request(uint8_t action, uint8_t sensors);
+
+/** Photo de l'état d'étalonnage. Sûr depuis n'importe quelle tâche. */
+void rt_imu_get_cal(rt_imu_cal_state_t *out);
+
 /** Nombre de resets du capteur depuis le démarrage. Doit rester à zéro. */
 uint32_t rt_imu_reset_count(void);
 
