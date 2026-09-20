@@ -54,6 +54,27 @@ MAGIC = 0xCA
 QUALITE = {0: "nulle", 1: "basse", 2: "moyenne", 3: "haute"}
 
 
+def diagnostic(stats, octets: int, vues: dict[int, int]) -> str:
+    """Ce que l'outil reçoit vraiment.
+
+    ⚠️ La première version ne montrait rien de tout ça : elle affichait « en
+    attente d'une trame IMU_CAL » aussi bien devant un port muet que devant un
+    flux valide dont elle ratait la trame. Un outil de diagnostic qui ne
+    distingue pas ces deux cas fait perdre plus de temps qu'il n'en fait gagner.
+    """
+    erreurs = stats.crc_errors + stats.format_errors + stats.overflows
+    ligne = (f"  liaison      {octets} octets   ·   {stats.frames_ok} trames valides"
+             f"   ·   {erreurs} erreurs")
+    if octets == 0:
+        return ligne + "\n  ⚠ rien n'arrive sur ce port — mauvais port, ou le nœud ne parle pas"
+    if stats.frames_ok == 0:
+        return ligne + "\n  ⚠ des octets arrivent mais aucune trame valide — mauvais débit ?"
+    if vues:
+        noms = " ".join(f"0x{i:03X}×{n}" for i, n in sorted(vues.items()))
+        return ligne + "\n  reçues       " + noms
+    return ligne
+
+
 def render(cal: dict | None, status: dict | None) -> str:
     if cal is None:
         return "  en attente d'une trame IMU_CAL…"
@@ -137,6 +158,8 @@ def main() -> int:
     id_status = proto.by_name["IMU_STATUS"].id
     cal: dict | None = None
     status: dict | None = None
+    octets = 0
+    vues: dict[int, int] = {}
 
     debut = time.monotonic()
     prochain_rendu = 0.0
@@ -144,7 +167,9 @@ def main() -> int:
         while True:
             en_attente = port.in_waiting
             data = port.read(en_attente if en_attente else 1)
+            octets += len(data)
             for frame_id, payload in decoder.feed(data):
+                vues[frame_id] = vues.get(frame_id, 0) + 1
                 fd = proto.frames.get(frame_id)
                 if fd is None:
                     continue
@@ -160,6 +185,8 @@ def main() -> int:
                 ecoule = maintenant - debut
                 sys.stdout.write(
                     f"  {args.device}   ·   {ecoule:6.1f} s\n\n"
+                    + diagnostic(decoder.stats, octets, vues)
+                    + "\n\n"
                     + render(cal, status)
                     + "\n\n  six faces → accel · immobile → gyro · huit en l'air → mag\n"
                     + "  puis :  python3 tools/imu_cal.py --device "
